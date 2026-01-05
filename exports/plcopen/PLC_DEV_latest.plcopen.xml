@@ -136,7 +136,7 @@ Test_LD();</xhtml>
                       </data>
                     </addData>
                   </vendorElement>
-                  <contact localId="4">
+                  <contact localId="4" negated="true">
                     <position x="0" y="0" />
                     <connectionPointIn>
                       <connection refLocalId="0" />
