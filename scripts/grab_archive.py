@@ -240,40 +240,72 @@ else:
     system.exit()
 
 # -------------------------
-# Export PLCopen XML (for diffs)
+# Export PLCopen XML (for diffs) - auto-discover method
 # -------------------------
-# We keep a stable filename for Git diffs + a timestamped snapshot for traceability.
 plcopen_stable = os.path.join(PLCOPEN_DIR, "%s.xml" % PLC_NAME)
 plcopen_ts = os.path.join(PLCOPEN_DIR, "%s_%s.xml" % (PLC_NAME, ts))
 
-exported = False
-try:
-    # Different builds expose export differently; try common patterns safely.
-    # If your CODESYS exposes a direct PLCopen export on the project object, it is often named like export_plcopenxml.
-    if hasattr(proj, "export_plcopenxml"):
-        print("Exporting PLCopen XML via proj.export_plcopenxml...")
-        proj.export_plcopenxml(plcopen_stable)
-        exported = True
-    elif hasattr(app, "export_plcopenxml"):
-        print("Exporting PLCopen XML via app.export_plcopenxml...")
-        app.export_plcopenxml(plcopen_stable)
-        exported = True
-    else:
-        print("PLCopen export method not found (export_plcopenxml). Skipping XML export for now.")
-except Exception as e:
-    print("WARNING: PLCopen export failed:", repr(e))
+def _find_export_candidates(obj):
+    names = []
+    for n in dir(obj):
+        ln = n.lower()
+        if "export" in ln and ("xml" in ln or "plcopen" in ln or "plc" in ln):
+            names.append(n)
+    return names
 
-if exported:
-    # Copy to timestamped snapshot too
+def _try_export(obj, method_name, path):
+    m = getattr(obj, method_name, None)
+    if m is None:
+        return False
     try:
-        if os.path.isfile(plcopen_stable):
-            with open(plcopen_stable, "rb") as src:
-                with open(plcopen_ts, "wb") as dst:
-                    dst.write(src.read())
-            print("PLCopen XML saved:", plcopen_stable)
-            print("PLCopen XML snapshot:", plcopen_ts)
+        # Try common signatures
+        try:
+            m(path)
+            return True
+        except TypeError:
+            pass
+        # Some exports require (path, options) or similar; just log and skip
+        return False
+    except Exception as e:
+        print("WARNING: export attempt failed via %s.%s:" % (type(obj).__name__, method_name), repr(e))
+        return False
+
+exported = False
+
+proj_candidates = _find_export_candidates(proj)
+app_candidates = _find_export_candidates(app)
+
+print("PLCopen export candidates (proj):", proj_candidates)
+print("PLCopen export candidates (app):", app_candidates)
+
+# Try project candidates first
+for name in proj_candidates:
+    print("Trying export via proj.%s(...)" % name)
+    if _try_export(proj, name, plcopen_stable):
+        exported = True
+        print("PLCopen export succeeded via proj.%s" % name)
+        break
+
+# If not, try application candidates
+if not exported:
+    for name in app_candidates:
+        print("Trying export via app.%s(...)" % name)
+        if _try_export(app, name, plcopen_stable):
+            exported = True
+            print("PLCopen export succeeded via app.%s" % name)
+            break
+
+if exported and os.path.isfile(plcopen_stable):
+    try:
+        with open(plcopen_stable, "rb") as src:
+            with open(plcopen_ts, "wb") as dst:
+                dst.write(src.read())
+        print("PLCopen XML saved:", plcopen_stable)
+        print("PLCopen XML snapshot:", plcopen_ts)
     except Exception as e:
         print("WARNING: Could not create timestamped PLCopen snapshot:", repr(e))
+else:
+    print("PLCopen export still not available (no compatible export method found).")
 
 # -------------------------
 # Git commit if repo exists and changes present
