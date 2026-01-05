@@ -240,13 +240,12 @@ else:
     system.exit()
 
 # -------------------------
-# Export PLCopen XML (for diffs)
+# Export PLCopen XML (single stable file for Git diffs)
 # -------------------------
 PLCOPEN_DIR = r"C:\PLC_REPO\exports\plcopen"
 if not os.path.isdir(PLCOPEN_DIR):
     os.makedirs(PLCOPEN_DIR)
 
-plcopen_path = os.path.join(PLCOPEN_DIR, "%s_%s.plcopen.xml" % (PLC_NAME, ts))
 plcopen_latest = os.path.join(PLCOPEN_DIR, "%s_latest.plcopen.xml" % PLC_NAME)
 
 class ER(ExportReporter):
@@ -262,40 +261,31 @@ class ER(ExportReporter):
 
 reporter = ER()
 
-print("Exporting PLCopen XML to:", plcopen_path)
+print("Exporting PLCopen XML (latest) to:", plcopen_latest)
 
 export_ok = False
 
-# Try the "Application export" way (common)
+# Try application export first
 try:
     app_obj = proj.active_application
-    # Some CODESYS variants expose export_xml on the app object
-    app_obj.export_xml(reporter, plcopen_path, recursive=True)
+    app_obj.export_xml(reporter, plcopen_latest, recursive=True)
     export_ok = True
     print("PLCopen XML export OK via app.export_xml")
 except Exception as e:
     print("PLCopen export via app.export_xml failed:", repr(e))
 
-# Try the "Project export" way (another common approach)
+# Fallback to project export
 if not export_ok:
     try:
-        proj.export_xml(reporter, proj.get_children(False), plcopen_path, recursive=True)
+        proj.export_xml(reporter, proj.get_children(False), plcopen_latest, recursive=True)
         export_ok = True
         print("PLCopen XML export OK via proj.export_xml")
     except Exception as e:
         print("PLCopen export via proj.export_xml failed:", repr(e))
 
-# Write/refresh a stable "latest" file for Git diffs
-if export_ok and os.path.isfile(plcopen_path):
-    try:
-        with open(plcopen_path, "rb") as src:
-            with open(plcopen_latest, "wb") as dst:
-                dst.write(src.read())
-        print("PLCopen XML latest updated:", plcopen_latest)
-    except Exception as e:
-        print("WARNING: Could not write latest PLCopen file:", repr(e))
-else:
-    print("PLCopen XML export not available in this ScriptEngine environment.")
+if not export_ok:
+    print("PLCopen XML export failed (no output written).")
+    system.exit()
 
 # -------------------------
 # Git commit if repo exists and changes present
@@ -308,7 +298,7 @@ if _git_is_repo():
 
         _run_git(["add", "-A"])
 
-        msg = "Day 2: %s export %s" % (PLC_NAME, ts)
+        msg = "%s export %s" % (PLC_NAME, ts)
         rc2, out2, err2 = _run_git(["commit", "-m", msg])
         if rc2 == 0:
             print("Git commit OK:", msg)
