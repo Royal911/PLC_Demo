@@ -43,6 +43,20 @@
             </data>
           </addData>
         </task>
+        <globalVars name="GLOBAL">
+          <variable name="Toggle">
+            <type>
+              <BOOL />
+            </type>
+          </variable>
+          <addData>
+            <data name="http://www.3s-software.com/plcopenxml/attributes" handleUnknown="implementation">
+              <Attributes>
+                <Attribute Name="qualified_only" Value="" />
+              </Attributes>
+            </data>
+          </addData>
+        </globalVars>
         <addData>
           <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
             <pou name="PLC_PRG" pouType="program">
@@ -56,22 +70,9 @@
                       <simpleValue value="0" />
                     </initialValue>
                   </variable>
-                  <variable name="Toggle">
-                    <type>
-                      <BOOL />
-                    </type>
-                    <initialValue>
-                      <simpleValue value="FALSE" />
-                    </initialValue>
-                  </variable>
                   <variable name="BlinkTimer">
                     <type>
                       <derived name="TON" />
-                    </type>
-                  </variable>
-                  <variable name="another">
-                    <type>
-                      <INT />
                     </type>
                   </variable>
                 </localVars>
@@ -86,9 +87,8 @@ Counter := Counter + 1;
 BlinkTimer(IN := TRUE, PT := T#1s);
 
 IF BlinkTimer.Q THEN
-    Toggle := NOT Toggle;
+    GLOBAL.Toggle := NOT GLOBAL.Toggle;
     BlinkTimer(IN := FALSE);
-	another := 10;
 END_IF
 Test_LD();</xhtml>
                 </ST>
@@ -144,10 +144,18 @@ Test_LD();</xhtml>
                     <connectionPointOut />
                     <variable>B1</variable>
                   </contact>
-                  <coil localId="5">
+                  <contact localId="5">
                     <position x="0" y="0" />
                     <connectionPointIn>
                       <connection refLocalId="4" />
+                    </connectionPointIn>
+                    <connectionPointOut />
+                    <variable>GLOBAL.Toggle</variable>
+                  </contact>
+                  <coil localId="6">
+                    <position x="0" y="0" />
+                    <connectionPointIn>
+                      <connection refLocalId="5" />
                     </connectionPointIn>
                     <connectionPointOut />
                     <variable>LMP1</variable>
