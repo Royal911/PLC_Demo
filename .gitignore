@@ -1,0 +1,17 @@
+# logs
+Logs/
+*.log
+
+# keep archives out of normal diffs (optional: keep only recent ones)
+exports/archives/
+
+# OS/editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# secrets (if you ever add any)
+*.secret
+*.env
+
