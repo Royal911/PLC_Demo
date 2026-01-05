@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <project xmlns="http://www.plcopen.org/xml/tc6_0200">
-  <fileHeader companyName="" productName="CODESYS" productVersion="CODESYS V3.5 SP21 Patch 4" creationDateTime="1970-01-01T00:00:00" />
-  <contentHeader name="PLC_DEV.project" modificationDateTime="1970-01-01T00:00:00">
+  <fileHeader companyName="" productName="CODESYS" productVersion="CODESYS V3.5 SP21 Patch 4" creationDateTime="2026-01-05T09:52:24.2926595" />
+  <contentHeader name="PLC_DEV.project" modificationDateTime="2026-01-05T09:47:17.5345684">
     <coordinateInfo>
       <fbd>
         <scaling x="1" y="1" />
@@ -24,61 +24,62 @@
     <pous />
   </types>
   <instances>
-    <configurations />
-  </instances>
-  <addData>
-    <data name="http://www.3s-software.com/plcopenxml/application" handleUnknown="implementation">
-      <resource name="Application">
-        <task name="MainTask" interval="PT0.02S" priority="1">
-          <pouInstance name="PLC_PRG" typeName="">
-            <documentation>
-              <xhtml xmlns="http://www.w3.org/1999/xhtml" />
-            </documentation>
-          </pouInstance>
+    <configurations>
+      <configuration name="Device">
+        <resource name="Application">
+          <task name="MainTask" interval="PT0.02S" priority="1">
+            <pouInstance name="PLC_PRG" typeName="">
+              <documentation>
+                <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+              </documentation>
+            </pouInstance>
+            <addData>
+              <data name="http://www.3s-software.com/plcopenxml/tasksettings" handleUnknown="implementation">
+                <TaskSettings KindOfTask="Cyclic" Interval="t#20ms" IntervalUnit="ms" WithinSPSTimeSlicing="true">
+                  <Watchdog Enabled="false" TimeUnit="ms" Sensitivity="1" />
+                </TaskSettings>
+              </data>
+              <data name="http://www.3s-software.com/plcopenxml/objectid" handleUnknown="discard">
+                <ObjectId>fd42ef9d-ae3b-4a6d-8986-0317ebe1cb8a</ObjectId>
+              </data>
+            </addData>
+          </task>
           <addData>
-            <data name="http://www.3s-software.com/plcopenxml/tasksettings" handleUnknown="implementation">
-              <TaskSettings KindOfTask="Cyclic" Interval="t#20ms" IntervalUnit="ms" WithinSPSTimeSlicing="true">
-                <Watchdog Enabled="false" TimeUnit="ms" Sensitivity="1" />
-              </TaskSettings>
-            </data>
-          </addData>
-        </task>
-        <addData>
-          <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
-            <pou name="PLC_PRG" pouType="program">
-              <interface>
-                <localVars>
-                  <variable name="Counter">
-                    <type>
-                      <INT />
-                    </type>
-                    <initialValue>
-                      <simpleValue value="0" />
-                    </initialValue>
-                  </variable>
-                  <variable name="Toggle">
-                    <type>
-                      <BOOL />
-                    </type>
-                    <initialValue>
-                      <simpleValue value="FALSE" />
-                    </initialValue>
-                  </variable>
-                  <variable name="BlinkTimer">
-                    <type>
-                      <derived name="TON" />
-                    </type>
-                  </variable>
-                  <variable name="test">
-                    <type>
-                      <BOOL />
-                    </type>
-                  </variable>
-                </localVars>
-              </interface>
-              <body>
-                <ST>
-                  <xhtml xmlns="http://www.w3.org/1999/xhtml">
+            <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
+              <pou name="PLC_PRG" pouType="program">
+                <interface>
+                  <localVars>
+                    <variable name="Counter">
+                      <type>
+                        <INT />
+                      </type>
+                      <initialValue>
+                        <simpleValue value="0" />
+                      </initialValue>
+                    </variable>
+                    <variable name="Toggle">
+                      <type>
+                        <BOOL />
+                      </type>
+                      <initialValue>
+                        <simpleValue value="FALSE" />
+                      </initialValue>
+                    </variable>
+                    <variable name="BlinkTimer">
+                      <type>
+                        <derived name="TON" />
+                      </type>
+                    </variable>
+                    <variable name="test">
+                      <type>
+                        <BOOL />
+                      </type>
+                    </variable>
+                  </localVars>
+                </interface>
+                <body>
+                  <ST>
+                    <xhtml xmlns="http://www.w3.org/1999/xhtml">
 (* Increment counter every cycle *)
 Counter := Counter + 1;
 
@@ -90,34 +91,84 @@ IF BlinkTimer.Q THEN
     BlinkTimer(IN := FALSE);
 	test := FALSE;
 END_IF</xhtml>
-                </ST>
-              </body>
-              <addData />
-            </pou>
-          </data>
-          <data name="http://www.3s-software.com/plcopenxml/libraries" handleUnknown="implementation">
-            <Libraries>
-              <Library Name="#Standard" Namespace="Standard" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="false" LinkAllContent="false" DefaultResolution="Standard, * (System)" />
-              <Library Name="#BreakpointLogging" Namespace="BPLog" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="Breakpoint Logging Functions, * (3S - Smart Software Solutions GmbH)" />
-              <Library Name="#IoStandard" Namespace="IoStandard" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="true" DefaultResolution="IoStandard, 3.5.17.0 (System)" />
-              <Library Name="#3SLicense" Namespace="_3S_LICENSE" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="3SLicense, 0.0.0.0 (CODESYS)" ResolverGuid="97c3b452-d9fa-4ac2-9d0c-3d420aa6d95b" />
-              <Library Name="#CAA Device Diagnosis" Namespace="DED" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="CAA Device Diagnosis, 3.5.21.0 (CAA Technical Workgroup)" />
-              <PlaceholderRedirections>
+                  </ST>
+                </body>
+                <addData>
+                  <data name="http://www.3s-software.com/plcopenxml/objectid" handleUnknown="discard">
+                    <ObjectId>49388984-a815-4723-be35-ec16b0402dcf</ObjectId>
+                  </data>
+                </addData>
+              </pou>
+            </data>
+            <data name="http://www.3s-software.com/plcopenxml/libraries" handleUnknown="implementation">
+              <Libraries>
+                <Library Name="#Standard" Namespace="Standard" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="false" LinkAllContent="false" DefaultResolution="Standard, * (System)" />
+                <Library Name="#BreakpointLogging" Namespace="BPLog" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="Breakpoint Logging Functions, * (3S - Smart Software Solutions GmbH)" />
+                <Library Name="#IoStandard" Namespace="IoStandard" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="true" DefaultResolution="IoStandard, 3.5.17.0 (System)" />
+                <Library Name="#3SLicense" Namespace="_3S_LICENSE" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="3SLicense, 0.0.0.0 (CODESYS)" ResolverGuid="97c3b452-d9fa-4ac2-9d0c-3d420aa6d95b" />
+                <Library Name="#CAA Device Diagnosis" Namespace="DED" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="CAA Device Diagnosis, 3.5.21.0 (CAA Technical Workgroup)" />
+                <PlaceholderRedirections>
+                  <PlaceholderRedirection Placeholder="Standard" Redirection="Standard, 3.5.18.0 (System)" />
+                  <PlaceholderRedirection Placeholder="Profinet" Redirection="Profinet, 4.7.0.0 (CODESYS)" />
                   <PlaceholderRedirection Placeholder="IoDrvProfinetBase" Redirection="IoDrvProfinetBase, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="IoDrvProfinetDevice" Redirection="IoDrvProfinetDevice, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="Profinet" Redirection="Profinet, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="ProfinetCommon" Redirection="ProfinetCommon, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="ProfinetDevice" Redirection="ProfinetDevice, 4.6.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="RPC" Redirection="Remote Procedure Calls, 4.6.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="Standard" Redirection="Standard, 3.5.18.0 (System)" />
-  <PlaceholderRedirection Placeholder="StringUtils" Redirection="StringUtils, 3.5.20.0 (System)" />
-
-              </PlaceholderRedirections>
-              <addData />
-            </Libraries>
+                  <PlaceholderRedirection Placeholder="StringUtils" Redirection="StringUtils, 3.5.20.0 (System)" />
+                  <PlaceholderRedirection Placeholder="RPC" Redirection="Remote Procedure Calls, 4.6.0.0 (CODESYS)" />
+                  <PlaceholderRedirection Placeholder="IoDrvProfinetDevice" Redirection="IoDrvProfinetDevice, 4.7.0.0 (CODESYS)" />
+                  <PlaceholderRedirection Placeholder="ProfinetDevice" Redirection="ProfinetDevice, 4.6.0.0 (CODESYS)" />
+                  <PlaceholderRedirection Placeholder="ProfinetCommon" Redirection="ProfinetCommon, 4.7.0.0 (CODESYS)" />
+                </PlaceholderRedirections>
+                <addData>
+                  <data name="http://www.3s-software.com/plcopenxml/objectid" handleUnknown="discard">
+                    <ObjectId>dfcca1e4-0e99-4068-b480-0a9cf829c977</ObjectId>
+                  </data>
+                </addData>
+              </Libraries>
+            </data>
+            <data name="http://www.3s-software.com/plcopenxml/objectid" handleUnknown="discard">
+              <ObjectId>4877cb19-c639-4594-8bba-548220956531</ObjectId>
+            </data>
+          </addData>
+        </resource>
+        <addData>
+          <data name="Device" handleUnknown="discard">
+            <Device xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="">
+              <DeviceType>
+                <DeviceIdentification>
+                  <Type>4096</Type>
+                  <Id>0000 1007</Id>
+                  <Version>4.18.0.0</Version>
+                </DeviceIdentification>
+                <Connector moduleType="256" interface="Common.PCI" connectorId="0">
+                  <HostParameterSet />
+                </Connector>
+                <Connector moduleType="1280" interface="GPIOSysfs" connectorId="1">
+                  <HostParameterSet />
+                </Connector>
+                <DeviceParameterSet />
+              </DeviceType>
+            </Device>
+          </data>
+          <data name="configurations" handleUnknown="discard">
+            <configurations />
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/objectid" handleUnknown="discard">
+            <ObjectId>d9cf6fad-1cff-491c-9254-834c2fc04174</ObjectId>
           </data>
         </addData>
-      </resource>
+      </configuration>
+    </configurations>
+  </instances>
+  <addData>
+    <data name="http://www.3s-software.com/plcopenxml/projectstructure" handleUnknown="discard">
+      <ProjectStructure>
+        <Object Name="Device" ObjectId="d9cf6fad-1cff-491c-9254-834c2fc04174">
+          <Object Name="Application" ObjectId="4877cb19-c639-4594-8bba-548220956531">
+            <Object Name="Library Manager" ObjectId="dfcca1e4-0e99-4068-b480-0a9cf829c977" />
+            <Object Name="PLC_PRG" ObjectId="49388984-a815-4723-be35-ec16b0402dcf" />
+            <Object Name="MainTask" ObjectId="fd42ef9d-ae3b-4a6d-8986-0317ebe1cb8a" />
+          </Object>
+        </Object>
+      </ProjectStructure>
     </data>
   </addData>
 </project>

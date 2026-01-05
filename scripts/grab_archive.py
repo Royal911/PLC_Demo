@@ -1,17 +1,18 @@
 # encoding: utf-8
 # Headless CODESYS ScriptEngine:
 # open project -> (optional) inject creds -> connect -> login -> source download
-# -> export archive + PLCopen XML -> git commit if changed -> exit
+# -> export archive + PLCopen XML -> normalize PLCopen (remove volatile metadata) -> git commit if changed -> exit
 #
-# Logs:   C:\PLC_REPO\Logs\grab_archive_YYYYMMDD_HHMMSS.log
+# Logs:    C:\PLC_REPO\Logs\grab_archive_YYYYMMDD_HHMMSS.log
 # Exports: C:\PLC_REPO\exports\archives\*.projectarchive
-#          C:\PLC_REPO\exports\plcopen\PLC_DEV.xml  (+ timestamped copy)
+#          C:\PLC_REPO\exports\plcopen\PLC_DEV_latest.plcopen.xml
 
 import os
 import datetime
 import time
 import sys
 import subprocess
+import re
 
 # -------------------------
 # CONFIG
@@ -92,6 +93,66 @@ def _run_git(args, check=False):
 
 def _git_is_repo():
     return os.path.isdir(os.path.join(REPO_ROOT, ".git"))
+
+# -------------------------
+# PLCopen normalization (remove volatile metadata so it doesn't commit every run)
+# -------------------------
+def normalize_plcopen_xml(path):
+    """
+    Make PLCopen XML stable between exports by:
+      - normalizing volatile timestamps
+      - canonicalizing PlaceholderRedirections block (sort + consistent indent)
+    """
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+
+        # decode safely
+        try:
+            text = raw.decode("utf-8")
+            enc = "utf-8"
+        except:
+            text = raw.decode("latin-1")
+            enc = "latin-1"
+
+        original = text
+
+        # 1) Normalize volatile timestamps
+        text = re.sub(r'creationDateTime="[^"]+"', 'creationDateTime="1970-01-01T00:00:00"', text)
+        text = re.sub(r'modificationDateTime="[^"]+"', 'modificationDateTime="1970-01-01T00:00:00"', text)
+        text = re.sub(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?",
+            "1970-01-01T00:00:00",
+            text
+        )
+
+        # 2) Canonicalize PlaceholderRedirections block
+        m = re.search(r"(<PlaceholderRedirections>\s*)(.*?)(\s*</PlaceholderRedirections>)", text, flags=re.DOTALL)
+        if m:
+            before = m.group(1)
+            body = m.group(2)
+            after = m.group(3)
+
+            lines = body.splitlines()
+            redirs = [ln.strip() for ln in lines if "<PlaceholderRedirection" in ln]
+            redirs_sorted = sorted(redirs)
+
+            indent = "  "
+            new_body = "\n".join([indent + r for r in redirs_sorted])
+            new_block = before + (new_body + "\n" if new_body else "") + after
+
+            text = text[:m.start()] + new_block + text[m.end():]
+
+        if text != original:
+            with open(path, "wb") as f:
+                f.write(text.encode(enc, errors="replace"))
+            print("Normalized PLCopen XML (timestamps + PlaceholderRedirections stabilized).")
+        else:
+            print("PLCopen XML already normalized/stable.")
+
+    except Exception as e:
+        print("WARNING: normalize_plcopen_xml failed:", repr(e))
+
 
 # -------------------------
 # Args
@@ -242,10 +303,6 @@ else:
 # -------------------------
 # Export PLCopen XML (single stable file for Git diffs)
 # -------------------------
-PLCOPEN_DIR = r"C:\PLC_REPO\exports\plcopen"
-if not os.path.isdir(PLCOPEN_DIR):
-    os.makedirs(PLCOPEN_DIR)
-
 plcopen_latest = os.path.join(PLCOPEN_DIR, "%s_latest.plcopen.xml" % PLC_NAME)
 
 class ER(ExportReporter):
@@ -287,27 +344,46 @@ if not export_ok:
     print("PLCopen XML export failed (no output written).")
     system.exit()
 
+# Normalize PLCopen XML to remove volatile timestamps so it won't commit every run
+normalize_plcopen_xml(plcopen_latest)
+
 # -------------------------
-# Git commit if repo exists and changes present
+# Git commit ONLY if git diff produces output for the PLCopen file
 # -------------------------
 if _git_is_repo():
-    print("Git repo detected. Checking for changes...")
-    rc, out, err = _run_git(["status", "--porcelain"])
-    if rc == 0 and out.strip():
-        print("Changes detected. Committing...")
+    print("Git repo detected. Checking for PLCopen diff output...")
 
-        _run_git(["add", "-A"])
+    rel_xml = os.path.relpath(plcopen_latest, REPO_ROOT).replace("\\", "/")
+
+    # Run git diff WITHOUT --quiet so we can check output text
+    rc, diff_out, diff_err = _run_git(["diff", "--", rel_xml])
+
+    # If diff_out is empty -> no differences -> do NOT commit
+    if diff_out.strip() == "":
+        print("No diff output (files equal). Skipping commit.")
+    else:
+        print("Diff output detected. Committing...")
+
+        # Stage only that file
+        _run_git(["add", "--", rel_xml])
 
         msg = "%s export %s" % (PLC_NAME, ts)
         rc2, out2, err2 = _run_git(["commit", "-m", msg])
+
         if rc2 == 0:
             print("Git commit OK:", msg)
         else:
             print("WARNING: Git commit failed.")
             print(out2)
             print(err2)
-    else:
-        print("No git changes to commit.")
+
+        # Optional: write diff into the log for debugging/audit
+        try:
+            print("----- git diff (truncated) -----")
+            print(diff_out[:4000])
+            print("----- end diff -----")
+        except:
+            pass
 else:
     print("No .git folder found in", REPO_ROOT, "- skipping git steps.")
 
