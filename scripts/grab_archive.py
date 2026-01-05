@@ -3,9 +3,7 @@
 # open project -> (optional) inject creds -> connect -> login -> source download
 # -> export archive + PLCopen XML -> normalize PLCopen (remove volatile metadata) -> git commit if changed -> exit
 #
-# Logs:    C:\PLC_REPO\Logs\grab_archive_YYYYMMDD_HHMMSS.log
-# Exports: C:\PLC_REPO\exports\archives\*.projectarchive
-#          C:\PLC_REPO\exports\plcopen\PLC_DEV_latest.plcopen.xml
+
 
 import os
 import datetime
@@ -93,23 +91,32 @@ def _run_git(args, check=False):
 
 def _git_is_repo():
     return os.path.isdir(os.path.join(REPO_ROOT, ".git"))
+    
+def _git_current_branch():
+    rc, out, err = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
+    if rc == 0:
+        return out.strip()
+    return ""
+def _git_has_origin():
+    rc, out, err = _run_git(["remote"])
+    return (rc == 0) and ("origin" in out.split())
+
 
 # -------------------------
 # PLCopen normalization (remove volatile metadata so it doesn't commit every run)
 # -------------------------
+import re
+
+import re
+
 def normalize_plcopen_xml(path):
-    """
-    Make PLCopen XML stable between exports by:
-      - normalizing volatile timestamps
-      - canonicalizing PlaceholderRedirections block (sort + consistent indent)
-    """
     try:
         with open(path, "rb") as f:
             raw = f.read()
 
-        # decode safely
+        # BOM-safe decode
         try:
-            text = raw.decode("utf-8")
+            text = raw.decode("utf-8-sig")
             enc = "utf-8"
         except:
             text = raw.decode("latin-1")
@@ -117,36 +124,36 @@ def normalize_plcopen_xml(path):
 
         original = text
 
-        # 1) Normalize volatile timestamps
+        # 1) Ignore volatile header timestamps
         text = re.sub(r'creationDateTime="[^"]+"', 'creationDateTime="1970-01-01T00:00:00"', text)
         text = re.sub(r'modificationDateTime="[^"]+"', 'modificationDateTime="1970-01-01T00:00:00"', text)
-        text = re.sub(
-            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?",
-            "1970-01-01T00:00:00",
-            text
-        )
 
-        # 2) Canonicalize PlaceholderRedirections block
-        m = re.search(r"(<PlaceholderRedirections>\s*)(.*?)(\s*</PlaceholderRedirections>)", text, flags=re.DOTALL)
+        # 2) Canonicalize PlaceholderRedirections block (sort + fixed indent)
+        m = re.search(r"<PlaceholderRedirections>.*?</PlaceholderRedirections>", text, flags=re.DOTALL)
         if m:
-            before = m.group(1)
-            body = m.group(2)
-            after = m.group(3)
+            block = m.group(0)
 
-            lines = body.splitlines()
-            redirs = [ln.strip() for ln in lines if "<PlaceholderRedirection" in ln]
-            redirs_sorted = sorted(redirs)
+            # Grab every PlaceholderRedirection line, strip whitespace to remove indent noise
+            redirs = []
+            for ln in block.splitlines():
+                if "<PlaceholderRedirection" in ln:
+                    redirs.append(ln.strip())
 
-            indent = "  "
-            new_body = "\n".join([indent + r for r in redirs_sorted])
-            new_block = before + (new_body + "\n" if new_body else "") + after
+            # Sort and dedupe for deterministic output
+            redirs = sorted(set(redirs))
+
+            indent = "  "  # consistent indentation
+            if redirs:
+                new_block = "<PlaceholderRedirections>\n" + "\n".join([indent + r for r in redirs]) + "\n</PlaceholderRedirections>"
+            else:
+                new_block = "<PlaceholderRedirections>\n</PlaceholderRedirections>"
 
             text = text[:m.start()] + new_block + text[m.end():]
 
         if text != original:
             with open(path, "wb") as f:
                 f.write(text.encode(enc, errors="replace"))
-            print("Normalized PLCopen XML (timestamps + PlaceholderRedirections stabilized).")
+            print("Normalized PLCopen XML (timestamps + PlaceholderRedirections).")
         else:
             print("PLCopen XML already normalized/stable.")
 
@@ -349,6 +356,7 @@ normalize_plcopen_xml(plcopen_latest)
 
 # -------------------------
 # Git commit ONLY if git diff produces output for the PLCopen file
+# + git push ONLY if commit succeeded
 # -------------------------
 if _git_is_repo():
     print("Git repo detected. Checking for PLCopen diff output...")
@@ -358,7 +366,6 @@ if _git_is_repo():
     # Run git diff WITHOUT --quiet so we can check output text
     rc, diff_out, diff_err = _run_git(["diff", "--", rel_xml])
 
-    # If diff_out is empty -> no differences -> do NOT commit
     if diff_out.strip() == "":
         print("No diff output (files equal). Skipping commit.")
     else:
@@ -372,6 +379,22 @@ if _git_is_repo():
 
         if rc2 == 0:
             print("Git commit OK:", msg)
+
+            # Push only after successful commit
+            if _git_has_origin():
+                branch = _git_current_branch()
+                if not branch:
+                    branch = "master"  # fallback
+                print("Pushing to origin/%s ..." % branch)
+                rc3, out3, err3 = _run_git(["push", "origin", branch])
+                if rc3 == 0:
+                    print("Git push OK.")
+                else:
+                    print("WARNING: Git push failed.")
+                    print(out3)
+                    print(err3)
+            else:
+                print("No 'origin' remote configured. Skipping push.")
         else:
             print("WARNING: Git commit failed.")
             print(out2)
@@ -386,6 +409,7 @@ if _git_is_repo():
             pass
 else:
     print("No .git folder found in", REPO_ROOT, "- skipping git steps.")
+
 
 # -------------------------
 # Optional disconnect

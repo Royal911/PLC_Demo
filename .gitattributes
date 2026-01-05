@@ -1,0 +1,3 @@
+# Force stable line endings for PLCopen XML
+exports/plcopen/*.xml text eol=lf
+
