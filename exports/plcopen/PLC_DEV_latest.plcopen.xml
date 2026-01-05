@@ -88,7 +88,6 @@ BlinkTimer(IN := TRUE, PT := T#1s);
 IF BlinkTimer.Q THEN
     Toggle := NOT Toggle;
     BlinkTimer(IN := FALSE);
-	test := FALSE;
 END_IF</xhtml>
                 </ST>
               </body>
