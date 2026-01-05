@@ -1,21 +1,28 @@
 # encoding: utf-8
 # Headless CODESYS ScriptEngine:
-# open project -> create online app -> inject credentials (NO Password Manager) -> connect -> login
-# -> source download -> save archive -> exit
+# open project -> (optional) inject creds -> connect -> login -> source download
+# -> export archive + PLCopen XML -> git commit if changed -> exit
 #
-# This version writes ALL output to: C:\PLC_REPO\Logs\grab_archive_YYYYMMDD_HHMMSS.log
+# Logs:   C:\PLC_REPO\Logs\grab_archive_YYYYMMDD_HHMMSS.log
+# Exports: C:\PLC_REPO\exports\archives\*.projectarchive
+#          C:\PLC_REPO\exports\plcopen\PLC_DEV.xml  (+ timestamped copy)
 
 import os
 import datetime
 import time
 import sys
+import subprocess
 
 # -------------------------
 # CONFIG
 # -------------------------
-OUT_DIR = r"C:\PLC_REPO\exports\archives"
-LOG_DIR = r"C:\PLC_REPO\Logs"
+REPO_ROOT = r"C:\PLC_REPO"
+OUT_DIR = os.path.join(REPO_ROOT, "exports", "archives")
+PLCOPEN_DIR = os.path.join(REPO_ROOT, "exports", "plcopen")
+LOG_DIR = os.path.join(REPO_ROOT, "Logs")
 TIMEOUT_S = 120
+
+PLC_NAME = "PLC_DEV"  # used for filenames + git commit message
 
 # -------------------------
 # Logging setup (redirect print/stdout/stderr to file)
@@ -27,7 +34,6 @@ def _init_logging():
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = os.path.join(LOG_DIR, "grab_archive_%s.log" % ts)
 
-    # Open as line-buffered so you see output even if the process crashes
     f = open(log_path, "a", buffering=1)
 
     class _Tee(object):
@@ -46,7 +52,6 @@ def _init_logging():
                 except:
                     pass
 
-    # Keep console output + also write to file
     sys.stdout = _Tee(sys.__stdout__, f)
     sys.stderr = _Tee(sys.__stderr__, f)
 
@@ -56,18 +61,40 @@ def _init_logging():
 
 LOG_PATH = _init_logging()
 
-# -------------------------
-# Helpers
-# -------------------------
-def fail(msg):
-    print("ERROR:", msg)
+def _ensure_dir(p):
+    if not os.path.isdir(p):
+        os.makedirs(p)
+
+def _run_git(args, check=False):
+    """
+    Runs git in REPO_ROOT. Returns (rc, stdout, stderr).
+    Uses subprocess so it works from ScriptEngine.
+    """
     try:
-        system.exit()
-    except:
-        pass
+        p = subprocess.Popen(
+            ["git"] + args,
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False
+        )
+        out, err = p.communicate()
+        out_s = out.decode("utf-8", errors="replace")
+        err_s = err.decode("utf-8", errors="replace")
+        if check and p.returncode != 0:
+            print("GIT ERROR running:", "git " + " ".join(args))
+            print("stdout:", out_s)
+            print("stderr:", err_s)
+        return p.returncode, out_s, err_s
+    except Exception as e:
+        print("WARNING: Git command failed (is Git installed / in PATH?):", repr(e))
+        return 1, "", repr(e)
+
+def _git_is_repo():
+    return os.path.isdir(os.path.join(REPO_ROOT, ".git"))
 
 # -------------------------
-# Args / creds
+# Args
 # -------------------------
 if len(sys.argv) < 2:
     print("ERROR: Missing project path argument.")
@@ -77,15 +104,16 @@ if len(sys.argv) < 2:
 PROJECT_PATH = sys.argv[1]
 print("Project path:", PROJECT_PATH)
 
-# Credentials provided per-run (recommended via BAT wrapper / Task Scheduler)
+# Optional credentials: use if provided; otherwise rely on locally stored creds
 CODESYS_USER = os.environ.get("CODESYS_USER", "")
 CODESYS_PASS = os.environ.get("CODESYS_PASS", "")
-if not CODESYS_USER or not CODESYS_PASS:
-    print("ERROR: Missing CODESYS_USER or CODESYS_PASS environment variables.")
-    system.exit()
+if CODESYS_USER and CODESYS_PASS:
+    print("Env credentials detected: will inject for this run.")
+else:
+    print("No env credentials provided: relying on locally stored credentials.")
 
-if not os.path.isdir(OUT_DIR):
-    os.makedirs(OUT_DIR)
+_ensure_dir(OUT_DIR)
+_ensure_dir(PLCOPEN_DIR)
 
 # -------------------------
 # Open project (headless-safe)
@@ -119,22 +147,21 @@ print("Logged in:", online_app.is_logged_in)
 dev = online_app.get_online_device()
 
 # -------------------------
-# Inject credentials WITHOUT using saved credentials / Password Manager
-# Key line: online.set_specific_credentials(...)
+# Optional credential injection (avoids Password Manager prompts)
 # -------------------------
-print("Injecting credentials for this script run (avoid Password Manager)...")
-try:
-    online.set_specific_credentials(dev, CODESYS_USER, CODESYS_PASS)
-except Exception as e:
-    print("WARNING: online.set_specific_credentials failed:", repr(e))
-
-# Optional fallback: some runtimes honor this for initial user auth
-if hasattr(dev, "set_credentials_for_initial_user"):
+if CODESYS_USER and CODESYS_PASS:
+    print("Injecting credentials for this script run (avoid Password Manager)...")
     try:
-        dev.set_credentials_for_initial_user(CODESYS_USER, CODESYS_PASS)
-        print("set_credentials_for_initial_user applied.")
+        online.set_specific_credentials(dev, CODESYS_USER, CODESYS_PASS)
     except Exception as e:
-        print("WARNING: set_credentials_for_initial_user failed:", repr(e))
+        print("WARNING: online.set_specific_credentials failed:", repr(e))
+
+    if hasattr(dev, "set_credentials_for_initial_user"):
+        try:
+            dev.set_credentials_for_initial_user(CODESYS_USER, CODESYS_PASS)
+            print("set_credentials_for_initial_user applied.")
+        except Exception as e:
+            print("WARNING: set_credentials_for_initial_user failed:", repr(e))
 
 # -------------------------
 # Connect device
@@ -163,7 +190,7 @@ if not (hasattr(dev, "connected") and dev.connected):
 print("Device connected:", dev.connected)
 
 # -------------------------
-# Login to application (OnlineChangeOption on your system: Keep / Force / Never)
+# Login to application
 # -------------------------
 if not online_app.is_logged_in:
     if "OnlineChangeOption" not in globals():
@@ -202,7 +229,7 @@ else:
 # Save project archive
 # -------------------------
 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-archive_path = os.path.join(OUT_DIR, "PLC_DEV_%s.projectarchive" % ts)
+archive_path = os.path.join(OUT_DIR, "%s_%s.projectarchive" % (PLC_NAME, ts))
 print("Saving archive to:", archive_path)
 
 if hasattr(proj, "save_archive"):
@@ -211,6 +238,66 @@ if hasattr(proj, "save_archive"):
 else:
     print("ERROR: proj.save_archive() not available in this environment.")
     system.exit()
+
+# -------------------------
+# Export PLCopen XML (for diffs)
+# -------------------------
+# We keep a stable filename for Git diffs + a timestamped snapshot for traceability.
+plcopen_stable = os.path.join(PLCOPEN_DIR, "%s.xml" % PLC_NAME)
+plcopen_ts = os.path.join(PLCOPEN_DIR, "%s_%s.xml" % (PLC_NAME, ts))
+
+exported = False
+try:
+    # Different builds expose export differently; try common patterns safely.
+    # If your CODESYS exposes a direct PLCopen export on the project object, it is often named like export_plcopenxml.
+    if hasattr(proj, "export_plcopenxml"):
+        print("Exporting PLCopen XML via proj.export_plcopenxml...")
+        proj.export_plcopenxml(plcopen_stable)
+        exported = True
+    elif hasattr(app, "export_plcopenxml"):
+        print("Exporting PLCopen XML via app.export_plcopenxml...")
+        app.export_plcopenxml(plcopen_stable)
+        exported = True
+    else:
+        print("PLCopen export method not found (export_plcopenxml). Skipping XML export for now.")
+except Exception as e:
+    print("WARNING: PLCopen export failed:", repr(e))
+
+if exported:
+    # Copy to timestamped snapshot too
+    try:
+        if os.path.isfile(plcopen_stable):
+            with open(plcopen_stable, "rb") as src:
+                with open(plcopen_ts, "wb") as dst:
+                    dst.write(src.read())
+            print("PLCopen XML saved:", plcopen_stable)
+            print("PLCopen XML snapshot:", plcopen_ts)
+    except Exception as e:
+        print("WARNING: Could not create timestamped PLCopen snapshot:", repr(e))
+
+# -------------------------
+# Git commit if repo exists and changes present
+# -------------------------
+if _git_is_repo():
+    print("Git repo detected. Checking for changes...")
+    rc, out, err = _run_git(["status", "--porcelain"])
+    if rc == 0 and out.strip():
+        print("Changes detected. Committing...")
+
+        _run_git(["add", "-A"])
+
+        msg = "Day 2: %s export %s" % (PLC_NAME, ts)
+        rc2, out2, err2 = _run_git(["commit", "-m", msg])
+        if rc2 == 0:
+            print("Git commit OK:", msg)
+        else:
+            print("WARNING: Git commit failed.")
+            print(out2)
+            print(err2)
+    else:
+        print("No git changes to commit.")
+else:
+    print("No .git folder found in", REPO_ROOT, "- skipping git steps.")
 
 # -------------------------
 # Optional disconnect
