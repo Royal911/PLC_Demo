@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <project xmlns="http://www.plcopen.org/xml/tc6_0200">
-  <fileHeader companyName="" productName="CODESYS" productVersion="CODESYS V3.5 SP21 Patch 4" creationDateTime="2026-01-05T09:10:38.4431419" />
-  <contentHeader name="PLC_DEV.project" modificationDateTime="2026-01-05T09:10:36.0573155">
+  <fileHeader companyName="" productName="CODESYS" productVersion="CODESYS V3.5 SP21 Patch 4" creationDateTime="2026-01-05T09:13:07.1527508" />
+  <contentHeader name="PLC_DEV.project" modificationDateTime="2026-01-05T09:13:04.66211">
     <coordinateInfo>
       <fbd>
         <scaling x="1" y="1" />
@@ -103,9 +103,9 @@ END_IF</xhtml>
               <Library Name="#3SLicense" Namespace="_3S_LICENSE" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="3SLicense, 0.0.0.0 (CODESYS)" ResolverGuid="97c3b452-d9fa-4ac2-9d0c-3d420aa6d95b" />
               <Library Name="#CAA Device Diagnosis" Namespace="DED" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="CAA Device Diagnosis, 3.5.21.0 (CAA Technical Workgroup)" />
               <PlaceholderRedirections>
+                <PlaceholderRedirection Placeholder="IoDrvProfinetBase" Redirection="IoDrvProfinetBase, 4.7.0.0 (CODESYS)" />
                 <PlaceholderRedirection Placeholder="Standard" Redirection="Standard, 3.5.18.0 (System)" />
                 <PlaceholderRedirection Placeholder="Profinet" Redirection="Profinet, 4.7.0.0 (CODESYS)" />
-                <PlaceholderRedirection Placeholder="IoDrvProfinetBase" Redirection="IoDrvProfinetBase, 4.7.0.0 (CODESYS)" />
                 <PlaceholderRedirection Placeholder="StringUtils" Redirection="StringUtils, 3.5.20.0 (System)" />
                 <PlaceholderRedirection Placeholder="RPC" Redirection="Remote Procedure Calls, 4.6.0.0 (CODESYS)" />
                 <PlaceholderRedirection Placeholder="IoDrvProfinetDevice" Redirection="IoDrvProfinetDevice, 4.7.0.0 (CODESYS)" />
