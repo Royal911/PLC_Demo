@@ -89,8 +89,74 @@ IF BlinkTimer.Q THEN
     Toggle := NOT Toggle;
     BlinkTimer(IN := FALSE);
 	another := 10;
-END_IF</xhtml>
+END_IF
+Test_LD();</xhtml>
                 </ST>
+              </body>
+              <addData />
+            </pou>
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
+            <pou name="Test_LD" pouType="program">
+              <interface>
+                <localVars>
+                  <variable name="B1">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="LMP1">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                </localVars>
+              </interface>
+              <body>
+                <LD>
+                  <!--ObjectVersion: LD2-->
+                  <leftPowerRail localId="0">
+                    <position x="0" y="0" />
+                    <connectionPointOut formalParameter="none" />
+                  </leftPowerRail>
+                  <comment localId="3" height="0" width="0">
+                    <position x="0" y="0" />
+                    <content>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+                    </content>
+                  </comment>
+                  <vendorElement localId="2">
+                    <position x="0" y="0" />
+                    <alternativeText>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+                    </alternativeText>
+                    <addData>
+                      <data name="http://www.3s-software.com/plcopenxml/fbdelementtype" handleUnknown="implementation">
+                        <ElementType xmlns="">networktitle</ElementType>
+                      </data>
+                    </addData>
+                  </vendorElement>
+                  <contact localId="4">
+                    <position x="0" y="0" />
+                    <connectionPointIn>
+                      <connection refLocalId="0" />
+                    </connectionPointIn>
+                    <connectionPointOut />
+                    <variable>B1</variable>
+                  </contact>
+                  <coil localId="5">
+                    <position x="0" y="0" />
+                    <connectionPointIn>
+                      <connection refLocalId="4" />
+                    </connectionPointIn>
+                    <connectionPointOut />
+                    <variable>LMP1</variable>
+                  </coil>
+                  <rightPowerRail localId="2147483647">
+                    <position x="0" y="0" />
+                    <connectionPointIn />
+                  </rightPowerRail>
+                </LD>
               </body>
               <addData />
             </pou>
