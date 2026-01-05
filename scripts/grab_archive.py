@@ -240,72 +240,62 @@ else:
     system.exit()
 
 # -------------------------
-# Export PLCopen XML (for diffs) - auto-discover method
+# Export PLCopen XML (for diffs)
 # -------------------------
-plcopen_stable = os.path.join(PLCOPEN_DIR, "%s.xml" % PLC_NAME)
-plcopen_ts = os.path.join(PLCOPEN_DIR, "%s_%s.xml" % (PLC_NAME, ts))
+PLCOPEN_DIR = r"C:\PLC_REPO\exports\plcopen"
+if not os.path.isdir(PLCOPEN_DIR):
+    os.makedirs(PLCOPEN_DIR)
 
-def _find_export_candidates(obj):
-    names = []
-    for n in dir(obj):
-        ln = n.lower()
-        if "export" in ln and ("xml" in ln or "plcopen" in ln or "plc" in ln):
-            names.append(n)
-    return names
+plcopen_path = os.path.join(PLCOPEN_DIR, "%s_%s.plcopen.xml" % (PLC_NAME, ts))
+plcopen_latest = os.path.join(PLCOPEN_DIR, "%s_latest.plcopen.xml" % PLC_NAME)
 
-def _try_export(obj, method_name, path):
-    m = getattr(obj, method_name, None)
-    if m is None:
+class ER(ExportReporter):
+    def error(self, obj, message):
+        print("PLCOPEN export ERROR on %s: %s" % (obj, message))
+    def warning(self, obj, message):
+        print("PLCOPEN export WARNING on %s: %s" % (obj, message))
+    def nonexportable(self, obj):
+        print("PLCOPEN not exportable: %s" % obj)
+    @property
+    def aborting(self):
         return False
+
+reporter = ER()
+
+print("Exporting PLCopen XML to:", plcopen_path)
+
+export_ok = False
+
+# Try the "Application export" way (common)
+try:
+    app_obj = proj.active_application
+    # Some CODESYS variants expose export_xml on the app object
+    app_obj.export_xml(reporter, plcopen_path, recursive=True)
+    export_ok = True
+    print("PLCopen XML export OK via app.export_xml")
+except Exception as e:
+    print("PLCopen export via app.export_xml failed:", repr(e))
+
+# Try the "Project export" way (another common approach)
+if not export_ok:
     try:
-        # Try common signatures
-        try:
-            m(path)
-            return True
-        except TypeError:
-            pass
-        # Some exports require (path, options) or similar; just log and skip
-        return False
+        proj.export_xml(reporter, proj.get_children(False), plcopen_path, recursive=True)
+        export_ok = True
+        print("PLCopen XML export OK via proj.export_xml")
     except Exception as e:
-        print("WARNING: export attempt failed via %s.%s:" % (type(obj).__name__, method_name), repr(e))
-        return False
+        print("PLCopen export via proj.export_xml failed:", repr(e))
 
-exported = False
-
-proj_candidates = _find_export_candidates(proj)
-app_candidates = _find_export_candidates(app)
-
-print("PLCopen export candidates (proj):", proj_candidates)
-print("PLCopen export candidates (app):", app_candidates)
-
-# Try project candidates first
-for name in proj_candidates:
-    print("Trying export via proj.%s(...)" % name)
-    if _try_export(proj, name, plcopen_stable):
-        exported = True
-        print("PLCopen export succeeded via proj.%s" % name)
-        break
-
-# If not, try application candidates
-if not exported:
-    for name in app_candidates:
-        print("Trying export via app.%s(...)" % name)
-        if _try_export(app, name, plcopen_stable):
-            exported = True
-            print("PLCopen export succeeded via app.%s" % name)
-            break
-
-if exported and os.path.isfile(plcopen_stable):
+# Write/refresh a stable "latest" file for Git diffs
+if export_ok and os.path.isfile(plcopen_path):
     try:
-        with open(plcopen_stable, "rb") as src:
-            with open(plcopen_ts, "wb") as dst:
+        with open(plcopen_path, "rb") as src:
+            with open(plcopen_latest, "wb") as dst:
                 dst.write(src.read())
-        print("PLCopen XML saved:", plcopen_stable)
-        print("PLCopen XML snapshot:", plcopen_ts)
+        print("PLCopen XML latest updated:", plcopen_latest)
     except Exception as e:
-        print("WARNING: Could not create timestamped PLCopen snapshot:", repr(e))
+        print("WARNING: Could not write latest PLCopen file:", repr(e))
 else:
-    print("PLCopen export still not available (no compatible export method found).")
+    print("PLCopen XML export not available in this ScriptEngine environment.")
 
 # -------------------------
 # Git commit if repo exists and changes present
