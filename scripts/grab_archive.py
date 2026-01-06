@@ -124,8 +124,11 @@ def _git_is_repo():
 def _git_current_branch():
     rc, out, err = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
     if rc == 0:
-        return out.strip()
-    return ""
+        b = out.strip()
+        if b and b != "HEAD":
+            return b
+    return "master"
+
 def _git_has_origin():
     rc, out, err = _run_git(["remote"])
     return (rc == 0) and ("origin" in out.split())
@@ -409,8 +412,6 @@ if _git_is_repo():
             # Push only after successful commit
             if _git_has_origin():
                 branch = _git_current_branch()
-                if not branch:
-                    branch = "master"  # fallback
                 print("Pushing to origin/%s ..." % branch)
                 rc3, out3, err3 = _run_git(["push", "origin", branch])
                 if rc3 == 0:
@@ -447,4 +448,8 @@ except Exception as e:
     print("WARNING: disconnect failed:", repr(e))
 
 print("===== grab_archive finished OK =====")
-system.exit()
+try:
+    system.exit()
+except:
+    pass
+
