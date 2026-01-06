@@ -110,6 +110,11 @@ Test_LD();</xhtml>
                       <BOOL />
                     </type>
                   </variable>
+                  <variable name="B2">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
                 </localVars>
               </interface>
               <body>
@@ -159,6 +164,39 @@ Test_LD();</xhtml>
                     </connectionPointIn>
                     <connectionPointOut />
                     <variable>LMP1</variable>
+                  </coil>
+                  <comment localId="9" height="0" width="0">
+                    <position x="0" y="0" />
+                    <content>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+                    </content>
+                  </comment>
+                  <vendorElement localId="8">
+                    <position x="0" y="0" />
+                    <alternativeText>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+                    </alternativeText>
+                    <addData>
+                      <data name="http://www.3s-software.com/plcopenxml/fbdelementtype" handleUnknown="implementation">
+                        <ElementType xmlns="">networktitle</ElementType>
+                      </data>
+                    </addData>
+                  </vendorElement>
+                  <contact localId="10">
+                    <position x="0" y="0" />
+                    <connectionPointIn>
+                      <connection refLocalId="0" />
+                    </connectionPointIn>
+                    <connectionPointOut />
+                    <variable>B2</variable>
+                  </contact>
+                  <coil localId="11">
+                    <position x="0" y="0" />
+                    <connectionPointIn>
+                      <connection refLocalId="10" />
+                    </connectionPointIn>
+                    <connectionPointOut />
+                    <variable>B1</variable>
                   </coil>
                   <rightPowerRail localId="2147483647">
                     <position x="0" y="0" />
