@@ -3,6 +3,35 @@
 # open project -> (optional) inject creds -> connect -> login -> source download
 # -> export archive + PLCopen XML -> normalize PLCopen (remove volatile metadata) -> git commit if changed -> exit
 #
+# ============================================================
+# PLC_REPO folder structure (single source of truth)
+#
+# C:\PLC_REPO\
+# ├─ .git\                       # Git repository metadata
+# ├─ .gitattributes              # Line-ending rules (PLCopen XML forced LF)
+# ├─ .gitignore                  # Ignore logs, archives, temp files
+# │
+# ├─ scripts\
+# │   └─ grab_archive.py         # Headless CODESYS export + normalize + git commit/push
+# │
+# ├─ exports\
+# │   ├─ archives\               # Binary project archives (.projectarchive)
+# │   │   └─ PLC_DEV_YYYYMMDD_HHMMSS.projectarchive
+# │   │
+# │   └─ plcopen\                # PLCopen XML for Git diffs
+# │       └─ PLC_DEV_latest.plcopen.xml
+# │
+# ├─ Logs\                       # Execution logs (one file per run)
+# │   └─ grab_archive_YYYYMMDD_HHMMSS.log
+# │
+# └─ README.md                   # (Optional) Process documentation
+#
+# Notes:
+# - Only PLC_DEV_latest.plcopen.xml is tracked in Git for diffs
+# - .projectarchive files are NOT tracked (binary, large)
+# - Git commits & pushes occur ONLY when PLCopen XML meaningfully changes
+# - Designed for unattended execution (Task Scheduler / CI-style)
+# ============================================================
 
 
 import os
@@ -105,9 +134,6 @@ def _git_has_origin():
 # -------------------------
 # PLCopen normalization (remove volatile metadata so it doesn't commit every run)
 # -------------------------
-import re
-
-import re
 
 def normalize_plcopen_xml(path):
     try:
