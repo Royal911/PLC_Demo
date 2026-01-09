@@ -127,7 +127,7 @@ Test_LD();</xhtml>
                   <comment localId="3" height="0" width="0">
                     <position x="0" y="0" />
                     <content>
-                      <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml">Alarm Lamp;</xhtml>
                     </content>
                   </comment>
                   <vendorElement localId="2">
@@ -168,7 +168,7 @@ Test_LD();</xhtml>
                   <comment localId="9" height="0" width="0">
                     <position x="0" y="0" />
                     <content>
-                      <xhtml xmlns="http://www.w3.org/1999/xhtml" />
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml">Suppress alarm</xhtml>
                     </content>
                   </comment>
                   <vendorElement localId="8">
