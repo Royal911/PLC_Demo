@@ -11,3 +11,6 @@ DEV PLC is running as CODESYS Virtual Control SL inside Docker on Server 1.
 Built a headless CODESYS script that can connect to a running DEV PLC, pull the source from the controller, export a project archive, and run fully unattended with proper logging.
 <img width="1970" height="1316" alt="image" src="https://github.com/user-attachments/assets/60d8cbac-586a-4b2a-8691-ea02aa75c71b" />
 
+
+The PLC stays the source of truth. A scheduled process runs a headless script on the engineering PC, pulls the source from a running DEV PLC, exports it as PLCopen XML, normalizes it to remove all the noisy metadata, and only commits when something meaningfully changes. If there’s no real diff, nothing gets pushed.
+<img width="2030" height="1353" alt="image" src="https://github.com/user-attachments/assets/c083a2e0-5c72-446f-a819-b0088c37ded8" />
