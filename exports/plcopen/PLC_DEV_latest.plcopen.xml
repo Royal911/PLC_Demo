@@ -57,40 +57,208 @@
             </data>
           </addData>
         </globalVars>
+        <globalVars name="GVL_Env">
+          <variable name="gIsDev">
+            <type>
+              <BOOL />
+            </type>
+            <initialValue>
+              <simpleValue value="FALSE" />
+            </initialValue>
+          </variable>
+          <addData>
+            <data name="http://www.3s-software.com/plcopenxml/attributes" handleUnknown="implementation">
+              <Attributes>
+                <Attribute Name="qualified_only" Value="" />
+              </Attributes>
+            </data>
+          </addData>
+        </globalVars>
+        <globalVars name="GVL_IO">
+          <variable name="gIO">
+            <type>
+              <derived name="ST_IO" />
+            </type>
+          </variable>
+          <variable name="gIsDev">
+            <type>
+              <BOOL />
+            </type>
+            <initialValue>
+              <simpleValue value="FALSE" />
+            </initialValue>
+            <documentation>
+              <xhtml xmlns="http://www.w3.org/1999/xhtml"> later: set from ENV/file at boot</xhtml>
+            </documentation>
+          </variable>
+        </globalVars>
         <addData>
+          <data name="http://www.3s-software.com/plcopenxml/datatype" handleUnknown="implementation">
+            <dataType name="ST_IO_IN">
+              <baseType>
+                <struct>
+                  <variable name="StartPB">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="StopPB">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="EStop">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="LS_Extended">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="LS_Retracted">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="MotorFB">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="TankLevel">
+                    <type>
+                      <REAL />
+                    </type>
+                    <documentation>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml"> 0..100 %</xhtml>
+                    </documentation>
+                  </variable>
+                  <variable name="Pressure">
+                    <type>
+                      <REAL />
+                    </type>
+                  </variable>
+                  <variable name="ValvePosFB">
+                    <type>
+                      <REAL />
+                    </type>
+                    <documentation>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml"> 0..100 %</xhtml>
+                    </documentation>
+                  </variable>
+                </struct>
+              </baseType>
+              <addData />
+            </dataType>
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/datatype" handleUnknown="implementation">
+            <dataType name="ST_IO_OUT">
+              <baseType>
+                <struct>
+                  <variable name="MotorRun">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="Pump">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="CylExtend">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="CylRetract">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="ValveCmd">
+                    <type>
+                      <REAL />
+                    </type>
+                    <documentation>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml"> 0..100 %</xhtml>
+                    </documentation>
+                  </variable>
+                  <variable name="VFD_SpeedCmd">
+                    <type>
+                      <REAL />
+                    </type>
+                    <documentation>
+                      <xhtml xmlns="http://www.w3.org/1999/xhtml"> 0..100 %</xhtml>
+                    </documentation>
+                  </variable>
+                </struct>
+              </baseType>
+              <addData />
+            </dataType>
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/datatype" handleUnknown="implementation">
+            <dataType name="ST_IO">
+              <baseType>
+                <struct>
+                  <variable name="In">
+                    <type>
+                      <derived name="ST_IO_IN" />
+                    </type>
+                  </variable>
+                  <variable name="Out">
+                    <type>
+                      <derived name="ST_IO_OUT" />
+                    </type>
+                  </variable>
+                </struct>
+              </baseType>
+              <addData />
+            </dataType>
+          </data>
           <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
             <pou name="PLC_PRG" pouType="program">
               <interface>
                 <localVars>
-                  <variable name="Counter">
+                  <variable name="IOMan">
                     <type>
-                      <INT />
-                    </type>
-                    <initialValue>
-                      <simpleValue value="0" />
-                    </initialValue>
-                  </variable>
-                  <variable name="BlinkTimer">
-                    <type>
-                      <derived name="TON" />
+                      <derived name="FB_IO_Manager" />
                     </type>
                   </variable>
                 </localVars>
               </interface>
               <body>
                 <ST>
-                  <xhtml xmlns="http://www.w3.org/1999/xhtml">
-(* Increment counter every cycle *)
-Counter := Counter + 1;
+                  <xhtml xmlns="http://www.w3.org/1999/xhtml">// Update IO layer
+IOMan(IsDev := gIsDev, CycleTime := T#20ms, IO := gIO);
 
-(* Toggle every 1 second *)
-BlinkTimer(IN := TRUE, PT := T#1s);
+// ---------------- Control Logic ----------------
+IF gIO.In.EStop THEN
+    gIO.Out.MotorRun := FALSE;
+    gIO.Out.Pump := FALSE;
+    gIO.Out.CylExtend := FALSE;
+    gIO.Out.CylRetract := FALSE;
+    gIO.Out.ValveCmd := 0.0;
+    gIO.Out.VFD_SpeedCmd := 0.0;
+ELSE
+    IF gIO.In.StartPB THEN
+        gIO.Out.MotorRun := TRUE;
+        gIO.Out.Pump := TRUE;
+        gIO.Out.VFD_SpeedCmd := 60.0;
+        gIO.Out.ValveCmd := 10.0;
+    END_IF
 
-IF BlinkTimer.Q THEN
-    GLOBAL.Toggle := NOT GLOBAL.Toggle;
-    BlinkTimer(IN := FALSE);
-END_IF
-Test_LD();</xhtml>
+    IF gIO.In.StopPB THEN
+        gIO.Out.MotorRun := FALSE;
+        gIO.Out.Pump := FALSE;
+        gIO.Out.VFD_SpeedCmd := 0.0;
+        gIO.Out.ValveCmd := 0.0;
+    END_IF
+
+    gIO.Out.CylExtend := gIO.Out.MotorRun;
+    gIO.Out.CylRetract := NOT gIO.Out.MotorRun;
+END_IF</xhtml>
                 </ST>
               </body>
               <addData />
@@ -203,6 +371,288 @@ Test_LD();</xhtml>
                     <connectionPointIn />
                   </rightPowerRail>
                 </LD>
+              </body>
+              <addData />
+            </pou>
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
+            <pou name="FB_IO_Sim" pouType="functionBlock">
+              <interface>
+                <inputVars>
+                  <variable name="Enable">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="CycleTime">
+                    <type>
+                      <TIME />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="TIME#20ms" />
+                    </initialValue>
+                  </variable>
+                  <variable name="AutoButtons">
+                    <type>
+                      <BOOL />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="TRUE" />
+                    </initialValue>
+                  </variable>
+                  <variable name="InjectEStop">
+                    <type>
+                      <BOOL />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="FALSE" />
+                    </initialValue>
+                  </variable>
+                  <variable name="JamMotor">
+                    <type>
+                      <BOOL />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="FALSE" />
+                    </initialValue>
+                  </variable>
+                </inputVars>
+                <inOutVars>
+                  <variable name="IO">
+                    <type>
+                      <derived name="ST_IO" />
+                    </type>
+                  </variable>
+                </inOutVars>
+                <localVars>
+                  <variable name="t">
+                    <type>
+                      <TIME />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="TIME#0ms" />
+                    </initialValue>
+                  </variable>
+                  <variable name="tMotorFB">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="tCylExt">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="tCylRet">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="tStartPeriod">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="tStopPeriod">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="tStartPulse">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="tStopPulse">
+                    <type>
+                      <derived name="TON" />
+                    </type>
+                  </variable>
+                  <variable name="valvePos">
+                    <type>
+                      <REAL />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="0.0" />
+                    </initialValue>
+                  </variable>
+                  <variable name="level">
+                    <type>
+                      <REAL />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="20.0" />
+                    </initialValue>
+                  </variable>
+                  <variable name="pressure">
+                    <type>
+                      <REAL />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="1.0" />
+                    </initialValue>
+                  </variable>
+                </localVars>
+              </interface>
+              <body>
+                <ST>
+                  <xhtml xmlns="http://www.w3.org/1999/xhtml">IF NOT Enable THEN RETURN; END_IF
+
+t := t + CycleTime;
+
+// ---------------- Buttons ----------------
+// ---------------- Buttons ----------------
+IF AutoButtons THEN
+
+    // -------- START button --------
+    tStartPeriod(IN := TRUE, PT := T#4s);
+    IF tStartPeriod.Q THEN
+        tStartPulse(IN := TRUE, PT := T#150ms);
+        tStartPeriod(IN := FALSE);   // restart period
+    END_IF
+
+    tStartPulse(IN := tStartPulse.IN, PT := T#150ms);
+    IO.In.StartPB := tStartPulse.Q;
+
+    // -------- STOP button --------
+    tStopPeriod(IN := TRUE, PT := T#20s);
+    IF tStopPeriod.Q THEN
+        tStopPulse(IN := TRUE, PT := T#150ms);
+        tStopPeriod(IN := FALSE);
+    END_IF
+
+    tStopPulse(IN := tStopPulse.IN, PT := T#150ms);
+    IO.In.StopPB := tStopPulse.Q;
+
+END_IF
+
+IO.In.EStop := InjectEStop;
+
+// ---------------- Motor feedback ----------------
+tMotorFB(IN := IO.Out.MotorRun AND NOT JamMotor, PT := T#400ms);
+IO.In.MotorFB := tMotorFB.Q;
+
+// ---------------- Cylinder limits ----------------
+tCylExt(IN := IO.Out.CylExtend, PT := T#600ms);
+tCylRet(IN := IO.Out.CylRetract, PT := T#600ms);
+
+IO.In.LS_Extended  := tCylExt.Q;
+IO.In.LS_Retracted := tCylRet.Q;
+
+// ---------------- Valve position ----------------
+IO.Out.ValveCmd := LIMIT(0.0, IO.Out.ValveCmd, 100.0);
+valvePos := valvePos + (IO.Out.ValveCmd - valvePos) * 0.08;
+IO.In.ValvePosFB := LIMIT(0.0, valvePos, 100.0);
+
+// ---------------- Tank level ----------------
+IF IO.Out.Pump THEN
+    level := level + 0.35;
+ELSE
+    level := level - (IO.In.ValvePosFB * 0.005);
+END_IF
+
+IO.In.TankLevel := LIMIT(0.0, level, 100.0);
+
+// ---------------- Pressure ----------------
+IO.Out.VFD_SpeedCmd := LIMIT(0.0, IO.Out.VFD_SpeedCmd, 100.0);
+pressure := 1.0 + IO.Out.VFD_SpeedCmd * 0.02;
+IO.In.Pressure := pressure;</xhtml>
+                </ST>
+              </body>
+              <addData />
+            </pou>
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
+            <pou name="FB_IO_Prod" pouType="functionBlock">
+              <interface>
+                <inOutVars>
+                  <variable name="IO">
+                    <type>
+                      <derived name="ST_IO" />
+                    </type>
+                  </variable>
+                </inOutVars>
+              </interface>
+              <body>
+                <ST>
+                  <xhtml xmlns="http://www.w3.org/1999/xhtml">// ================= READ PROD INPUTS =================
+// Map your physical / fieldbus / Modbus / MQTT inputs here
+// Example:
+// IO.In.StartPB      := DI_StartPB;
+// IO.In.StopPB       := DI_StopPB;
+// IO.In.EStop        := DI_EStop;
+// IO.In.LS_Extended  := DI_LS_Extended;
+// IO.In.LS_Retracted := DI_LS_Retracted;
+// IO.In.MotorFB      := DI_MotorFB;
+//
+// IO.In.TankLevel    := AI_TankLevel;
+// IO.In.Pressure     := AI_Pressure;
+// IO.In.ValvePosFB   := AI_ValvePosFB;
+
+// ================= WRITE PROD OUTPUTS =================
+// Example:
+// DO_MotorRun     := IO.Out.MotorRun;
+// DO_Pump         := IO.Out.Pump;
+// DO_CylExtend    := IO.Out.CylExtend;
+// DO_CylRetract   := IO.Out.CylRetract;
+//
+// AO_ValveCmd     := IO.Out.ValveCmd;
+// AO_VFD_SpeedCmd := IO.Out.VFD_SpeedCmd;</xhtml>
+                </ST>
+              </body>
+              <addData />
+            </pou>
+          </data>
+          <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
+            <pou name="FB_IO_Manager" pouType="functionBlock">
+              <interface>
+                <inputVars>
+                  <variable name="IsDev">
+                    <type>
+                      <BOOL />
+                    </type>
+                  </variable>
+                  <variable name="CycleTime">
+                    <type>
+                      <TIME />
+                    </type>
+                    <initialValue>
+                      <simpleValue value="TIME#20ms" />
+                    </initialValue>
+                  </variable>
+                </inputVars>
+                <inOutVars>
+                  <variable name="IO">
+                    <type>
+                      <derived name="ST_IO" />
+                    </type>
+                  </variable>
+                </inOutVars>
+                <localVars>
+                  <variable name="Sim">
+                    <type>
+                      <derived name="FB_IO_Sim" />
+                    </type>
+                  </variable>
+                  <variable name="Prod">
+                    <type>
+                      <derived name="FB_IO_Prod" />
+                    </type>
+                  </variable>
+                </localVars>
+              </interface>
+              <body>
+                <ST>
+                  <xhtml xmlns="http://www.w3.org/1999/xhtml">IF IsDev THEN
+    Sim(
+        Enable := TRUE,
+        CycleTime := CycleTime,
+        IO := IO
+    );
+ELSE
+    Prod(IO := IO);
+END_IF</xhtml>
+                </ST>
               </body>
               <addData />
             </pou>
