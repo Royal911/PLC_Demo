@@ -59,6 +59,14 @@
               <simpleValue value="FALSE" />
             </initialValue>
           </variable>
+          <variable name="gMode">
+            <type>
+              <derived name="E_RunMode" />
+            </type>
+            <initialValue>
+              <simpleValue value="E_RunMode.PROD" />
+            </initialValue>
+          </variable>
         </globalVars>
         <addData>
           <data name="http://www.3s-software.com/plcopenxml/datatype" handleUnknown="implementation">
@@ -259,6 +267,20 @@
               </addData>
             </dataType>
           </data>
+          <data name="http://www.3s-software.com/plcopenxml/datatype" handleUnknown="implementation">
+            <dataType name="E_RunMode">
+              <baseType>
+                <enum>
+                  <values>
+                    <value name="DEV" />
+                    <value name="STG" />
+                    <value name="PROD" />
+                  </values>
+                </enum>
+              </baseType>
+              <addData />
+            </dataType>
+          </data>
           <data name="http://www.3s-software.com/plcopenxml/pou" handleUnknown="implementation">
             <pou name="PLC_PRG" pouType="program">
               <interface>
@@ -281,7 +303,7 @@
 Boot();
 
 // 2) Route IO
-IOMan(IsDev := gIsDev, CycleTime := T#20ms, IO := gIO);
+IOMan(Mode := gMode, IO := gIO);
 
 // 3) Control logic
 
@@ -362,18 +384,10 @@ END_IF</xhtml>
             <pou name="FB_IO_Manager" pouType="functionBlock">
               <interface>
                 <inputVars>
-                  <variable name="IsDev">
+                  <variable name="Mode">
                     <type>
-                      <BOOL />
+                      <derived name="E_RunMode" />
                     </type>
-                  </variable>
-                  <variable name="CycleTime">
-                    <type>
-                      <TIME />
-                    </type>
-                    <initialValue>
-                      <simpleValue value="TIME#20ms" />
-                    </initialValue>
                   </variable>
                 </inputVars>
                 <inOutVars>
@@ -386,23 +400,25 @@ END_IF</xhtml>
                 <localVars>
                   <variable name="Sim">
                     <type>
-                      <derived name="FB_IO_Sim" />
+                      <derived name="FB_IO_SIM" />
                     </type>
                   </variable>
                   <variable name="Prod">
                     <type>
-                      <derived name="FB_IO_Prod" />
+                      <derived name="FB_IO_PROD" />
                     </type>
                   </variable>
                 </localVars>
               </interface>
               <body>
                 <ST>
-                  <xhtml xmlns="http://www.w3.org/1999/xhtml">IF IsDev THEN
+                  <xhtml xmlns="http://www.w3.org/1999/xhtml">// DEV + STG = simulated IO
+IF (Mode = E_RunMode.DEV) OR (Mode = E_RunMode.STG) THEN
     Sim(IO := IO);
 ELSE
     Prod(IO := IO);
-END_IF</xhtml>
+END_IF
+</xhtml>
                 </ST>
               </body>
               <addData />
@@ -447,24 +463,31 @@ END_IF</xhtml>
 IF NOT init THEN
     init := TRUE;
 
-    gIsDev := FALSE;
+    gMode := E_RunMode.PROD;   // safe default
     outBuf := '';
 
     n := SysProcessExecuteCommand2(
-        pszCommand := 'cat /conf/codesyscontrol/env.txt',
+        pszCommand := '/usr/bin/head -c 4 /conf/codesyscontrol/env.txt',
         pszStdOut := outBuf,
         udiStdOutLen := SIZEOF(outBuf),
         pResult := ADR(res)
     );
 
-    IF (res = 0) AND (n &gt;= 3) THEN
+    IF n &gt;= 3 THEN
         IF (LEFT(outBuf, 3) = 'dev') OR (LEFT(outBuf, 3) = 'DEV') THEN
-            gIsDev := TRUE;
+            gMode := E_RunMode.DEV;
+
+        ELSIF (LEFT(outBuf, 3) = 'stg') OR (LEFT(outBuf, 3) = 'STG') THEN
+            gMode := E_RunMode.STG;
+
+        ELSIF (LEFT(outBuf, 4) = 'prod') OR (LEFT(outBuf, 4) = 'PROD') THEN
+            gMode := E_RunMode.PROD;
         END_IF
     END_IF
 
     Done := TRUE;
 END_IF
+
 </xhtml>
                 </ST>
               </body>
