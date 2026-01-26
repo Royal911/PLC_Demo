@@ -313,6 +313,8 @@ IF gIO.In.EStop THEN
     gIO.Out.MotorRun := FALSE;
     gIO.Out.Pump := FALSE;
     gIO.Out.CylExtend := FALSE;
+	gIO.Out.VFD_SpeedCmd := 0;
+    gIO.Out.ValveCmd := 0;
 ELSE
     IF gIO.In.StartPB THEN
         gIO.Out.MotorRun := TRUE;
