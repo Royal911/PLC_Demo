@@ -1,66 +1,28 @@
 # encoding: utf-8
-# DEPLOY STAGING: Git (staging branch) -> import PLCopen XML -> build -> boot app -> start if needed
+# DEPLOY STAGING (ARCHIVE): Git staging -> open PLC_latest.projectarchive -> download to PLC -> boot app
 #
 # Usage:
-# --runscript="C:\PLC_REPO\scripts\deploy_staging.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_STG.project"
+# "C:\Program Files\CODESYS 3.5.21.40\CODESYS\Common\CODESYS.exe" --noUI --profile="CODESYS V3.5 SP21 Patch 4" --runscript="C:\PLC_REPO\scripts\deploy_staging.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_STG.project"
+#
+# NOTE:
+# - The .project path is only used to get a configured target/device entry if needed.
+# - The actual content deployed comes from: exports\archives\PLC_latest.projectarchive
 
 import os
 import sys
 import time
 import subprocess
 import traceback
-import hashlib
-
-# Reduce noisy CODESYS embedded-python warning threads
-try:
-    import warnings
-    warnings.filterwarnings("ignore")
-except:
-    pass
 
 REPO_ROOT = r"C:\PLC_REPO"
 TIMEOUT_S = 120
 BRANCH = "staging"
 
-# Your single “latest” file (committed to Git)
-PLCOPEN_XML = os.path.join(REPO_ROOT, "exports", "plcopen", "PLC_latest.plcopen.xml")
+LATEST_ARCHIVE = os.path.join(REPO_ROOT, "exports", "archives", "PLC_latest.projectarchive")
 
 
 # -------------------------
-# Small utilities
-# -------------------------
-def _sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while True:
-            b = f.read(1024 * 1024)
-            if not b:
-                break
-            h.update(b)
-    return h.hexdigest()
-
-def _list_methods(obj, label, contains=None):
-    try:
-        names = []
-        for n in dir(obj):
-            ln = n.lower()
-            if contains is None:
-                names.append(n)
-            else:
-                for c in contains:
-                    if c in ln:
-                        names.append(n)
-                        break
-        print(label, "type:", type(obj))
-        print(label, "methods matching:", contains)
-        for n in sorted(set(names)):
-            print(" -", n)
-    except Exception as e:
-        print("WARN:", label, "method listing failed:", repr(e))
-
-
-# -------------------------
-# Git helpers
+# Git
 # -------------------------
 def _run_git(args):
     p = subprocess.Popen(
@@ -68,7 +30,7 @@ def _run_git(args):
         cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        shell=False,
+        shell=False
     )
     out, err = p.communicate()
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
@@ -94,7 +56,7 @@ def _git_checkout_and_update(branch):
 
 
 # -------------------------
-# CODESYS helpers
+# CODESYS: project + online
 # -------------------------
 def _close_projects_best_effort():
     try:
@@ -145,8 +107,9 @@ def _connect_and_login(app, user, pw):
     else:
         print("Online: relying on stored credentials")
 
+    # connect
     last_err = None
-    for attempt in range(1, 4):
+    for attempt in [1, 2, 3]:
         try:
             if hasattr(dev, "connected") and dev.connected:
                 print("Online: already connected")
@@ -168,6 +131,7 @@ def _connect_and_login(app, user, pw):
     if not (hasattr(dev, "connected") and dev.connected):
         raise Exception("Device did not connect (last_err=%s)" % repr(last_err))
 
+    # login
     if not online_app.is_logged_in:
         OnlineChangeOption = globals().get("OnlineChangeOption", None)
         if OnlineChangeOption is None:
@@ -193,107 +157,15 @@ def _disconnect_best_effort(online_app, dev):
         pass
 
 
-# -------------------------
-# PLCopen import (critical part)
-# -------------------------
-def _import_plcopen_into_project(proj, app, xml_path):
-    """
-    Import PLCopen XML into the opened project BEFORE deploying.
-    CODESYS scripting APIs vary, so we try several import entry points.
-
-    Returns (ok: bool, used: str)
-    """
-    if not os.path.isfile(xml_path):
-        return False, "PLCopen XML not found: %s" % xml_path
-
-    size = os.path.getsize(xml_path)
-    sha = _sha256(xml_path)
-    print("PLCOPEN: using:", xml_path)
-    print("PLCOPEN: size=%s sha256=%s" % (size, sha))
-
-    # Show relevant methods for quick debugging
-    _list_methods(app, "ActiveApplication", contains=["import", "xml"])
-    _list_methods(proj, "Project", contains=["import", "xml"])
-    _list_methods(projects, "projects module", contains=["import", "xml"])
-
-    last_err = None
-
-    # Helper: best effort save after import
-    def _save_best_effort():
-        try:
-            if hasattr(proj, "save"):
-                proj.save()
-                print("Project saved.")
-        except Exception as e:
-            print("WARN: project save failed:", repr(e))
-
-    # Attempt 1: app.import_xml(xml_path, ...)
-    if hasattr(app, "import_xml"):
-        try:
-            # Some versions: import_xml(path, recursive=True)
-            try:
-                app.import_xml(xml_path, recursive=True)
-                _save_best_effort()
-                return True, "app.import_xml(path, recursive=True)"
-            except TypeError:
-                pass
-
-            # Some versions: import_xml(path)
-            app.import_xml(xml_path)
-            _save_best_effort()
-            return True, "app.import_xml(path)"
-        except Exception as e:
-            last_err = e
-            print("PLCOPEN import attempt app.import_xml failed:", repr(e))
-
-    # Attempt 2: proj.import_xml(...)
-    if hasattr(proj, "import_xml"):
-        try:
-            # Some versions: proj.import_xml(path, recursive=True)
-            try:
-                proj.import_xml(xml_path, recursive=True)
-                _save_best_effort()
-                return True, "proj.import_xml(path, recursive=True)"
-            except TypeError:
-                pass
-
-            proj.import_xml(xml_path)
-            _save_best_effort()
-            return True, "proj.import_xml(path)"
-        except Exception as e:
-            last_err = e
-            print("PLCOPEN import attempt proj.import_xml failed:", repr(e))
-
-    # Attempt 3: projects.import_xml(...)
-    if hasattr(projects, "import_xml"):
-        try:
-            projects.import_xml(xml_path)
-            _save_best_effort()
-            return True, "projects.import_xml(path)"
-        except Exception as e:
-            last_err = e
-            print("PLCOPEN import attempt projects.import_xml failed:", repr(e))
-
-    return False, "No working PLCopen import method (last_err=%s)" % repr(last_err)
-
-
-# -------------------------
-# Deploy via boot application + start if needed
-# -------------------------
 def _start_if_needed(online_app):
-    state = None
-    try:
-        if hasattr(online_app, "application_state"):
-            state = online_app.application_state
-            print("Application state (before):", state)
-    except Exception as e:
-        print("WARN: reading application_state failed:", repr(e))
-
     # If already running, don't start
     try:
-        if state is not None and str(state).lower().endswith(".run"):
-            print("Application already RUNNING. No start needed.")
-            return True
+        if hasattr(online_app, "application_state"):
+            st = online_app.application_state
+            print("Application state (before):", st)
+            if str(st).lower().endswith(".run"):
+                print("Application already RUNNING. No start needed.")
+                return True
     except:
         pass
 
@@ -303,27 +175,54 @@ def _start_if_needed(online_app):
             print("DEPLOY: called online_app.start()")
         except Exception as e:
             print("DEPLOY: online_app.start() failed:", repr(e))
-
-    try:
-        if hasattr(online_app, "application_state"):
-            print("Application state (after):", online_app.application_state)
-    except Exception as e:
-        print("WARN: reading application_state failed:", repr(e))
-
     return True
 
 
-def _deploy_via_boot_application(online_app):
-    if not hasattr(online_app, "create_boot_application"):
-        return False, "create_boot_application not available"
-
-    try:
+def _deploy_boot_app(online_app):
+    # Your runtime supports this (we already proved it)
+    if hasattr(online_app, "create_boot_application"):
         online_app.create_boot_application()
-        print("DEPLOY: SUCCESS via OnlineApp.create_boot_application()")
+        print("DEPLOY: create_boot_application OK")
         _start_if_needed(online_app)
-        return True, "OnlineApp.create_boot_application()"
+        return True, "create_boot_application"
+    return False, "create_boot_application not available"
+
+
+# -------------------------
+# ARCHIVE restore/open (best-effort)
+# -------------------------
+def _open_archive_as_project(archive_path):
+    """
+    CODESYS scripting differs by version.
+    We try common patterns:
+      - projects.open(archive_path, primary=True)  (sometimes works directly)
+      - projects.open_archive(archive_path, primary=True) if available
+    """
+    if not os.path.isfile(archive_path):
+        raise Exception("Latest archive not found: %s" % archive_path)
+
+    print("ARCHIVE: using:", archive_path)
+
+    # Try open_archive if it exists
+    if hasattr(projects, "open_archive"):
+        try:
+            _close_projects_best_effort()
+            proj = projects.open_archive(archive_path, primary=True)
+            print("ARCHIVE: opened via projects.open_archive")
+            return proj
+        except Exception as e:
+            print("ARCHIVE: open_archive failed:", repr(e))
+
+    # Try opening directly
+    try:
+        _close_projects_best_effort()
+        proj = projects.open(archive_path, primary=True)
+        print("ARCHIVE: opened via projects.open(archive_path)")
+        return proj
     except Exception as e:
-        return False, "create_boot_application failed: %s" % repr(e)
+        print("ARCHIVE: projects.open(archive_path) failed:", repr(e))
+
+    raise Exception("Could not open archive via scripting API (need different method on this install)")
 
 
 # -------------------------
@@ -331,49 +230,39 @@ def _deploy_via_boot_application(online_app):
 # -------------------------
 def main():
     if len(sys.argv) < 2:
-        print("ERROR: Missing STG project path")
-        print('--scriptargs:"C:\\Users\\Test_bench\\Documents\\PLC_STG.project"')
+        print("ERROR: Missing STG project path (used only for device config reference)")
         system.exit()
 
-    project_path = sys.argv[1].strip().strip('"')
-    print("STG project:", project_path)
+    stg_project_path = sys.argv[1].strip().strip('"')
+    print("STG project (reference):", stg_project_path)
 
-    # 1) Update local repo to latest staging
     if not _git_checkout_and_update(BRANCH):
         print("ERROR: git checkout/pull failed")
         system.exit()
 
-    # 2) Ensure PLCopen XML exists in this branch
-    if not os.path.isfile(PLCOPEN_XML):
-        print("ERROR: PLCopen XML not found:", PLCOPEN_XML)
-        print("Tip: make sure PLC_latest.plcopen.xml is committed and merged into staging.")
+    if not os.path.isfile(LATEST_ARCHIVE):
+        print("ERROR: latest archive missing:", LATEST_ARCHIVE)
+        print("Tip: DEV capture must write exports\\archives\\PLC_latest.projectarchive")
         system.exit()
 
-    # 3) Open project
     user = os.environ.get("CODESYS_USER", "")
     pw = os.environ.get("CODESYS_PASS", "")
 
-    proj = _open_project_primary(project_path)
+    # Open the archive project (this is what we deploy)
+    proj = _open_archive_as_project(LATEST_ARCHIVE)
     app = _wait_active_app(proj)
     if app is None:
-        print("ERROR: active_application timeout")
+        print("ERROR: active_application timeout after opening archive")
         system.exit()
 
-    # 4) IMPORT PLCopen into the STG project (this is the missing step)
-    ok_imp, used_imp = _import_plcopen_into_project(proj, app, PLCOPEN_XML)
-    if not ok_imp:
-        print("ERROR: PLCopen import failed:", used_imp)
-        system.exit()
-    print("PLCOPEN import OK:", used_imp)
-
-    # 5) Connect + deploy
+    # Connect & deploy
     online_app, dev = _connect_and_login(app, user, pw)
     try:
-        ok_dep, used_dep = _deploy_via_boot_application(online_app)
-        if not ok_dep:
-            print("ERROR: deploy failed:", used_dep)
+        ok, used = _deploy_boot_app(online_app)
+        if not ok:
+            print("ERROR: deploy failed:", used)
             system.exit()
-        print("DEPLOY OK:", used_dep)
+        print("DEPLOY OK:", used)
     finally:
         _disconnect_best_effort(online_app, dev)
 
