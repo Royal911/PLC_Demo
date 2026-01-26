@@ -2,21 +2,17 @@
 # ============================================================
 # grab_archive.py  (ONE-RUN / MULTI-BRANCH PLC GitOps AGENT)
 #
-# dev     : CAPTURE  (PLC -> Git)  : source pull -> export PLCopen -> normalize -> commit/push if changed
-# staging : DEPLOY   (Git -> PLC)  : if origin/staging ahead -> ff-pull -> download project to PLC
-# prod    : DEPLOY   (Git -> PLC)  : if origin/prod ahead    -> ff-pull -> download project to PLC
+# DEV capture:
+#   - pulls source from PLC
+#   - exports PLCopen to ONE file (overwritten): exports\plcopen\PLC_latest.plcopen.xml
+#   - saves archive to exports\archives\dev\...
+#   - if repo changed -> commit EVERYTHING (git add -A) + push to origin/dev
 #
-# Projects discovery:
-#   --scriptargs:"C:\Users\Test_bench\Documents"
-#   Must find: PLC_DEV.project, PLC_STG.project, PLC_PROD.project
+# STAGING / PROD deploy:
+#   - if origin/<branch> differs -> ff-only pull -> download to controller
 #
-# Exports/logs under repo:
-#   exports\archives\<branch>\*.projectarchive      (not tracked)
-#   exports\plcopen\PLC_latest.plcopen.xml          (SINGLE FILE, overwritten each run)
-#   Logs\plc_agent_YYYYMMDD_HHMMSS.log
-#
-# Optional env vars:
-#   CODESYS_USER / CODESYS_PASS
+# Run example:
+#   --runscript="C:\PLC_REPO\scripts\grab_archive.py" --scriptargs:"C:\Users\Test_bench\Documents"
 # ============================================================
 
 import os
@@ -28,27 +24,19 @@ import re
 import glob
 import traceback
 
-# -------------------------
-# CONFIG
-# -------------------------
 REPO_ROOT = r"C:\PLC_REPO"
 EXPORTS_ROOT = os.path.join(REPO_ROOT, "exports")
 LOG_DIR = os.path.join(REPO_ROOT, "Logs")
 TIMEOUT_S = 120
 
 BRANCHES = ["dev", "staging", "prod"]
-BRANCH_TO_PLCNAME = {
-    "dev": "PLC_DEV",
-    "staging": "PLC_STG",
-    "prod": "PLC_PROD",
-}
+BRANCH_TO_PLCNAME = {"dev": "PLC_DEV", "staging": "PLC_STG", "prod": "PLC_PROD"}
 
-# Flat PLCopen folder + ONE FILE
 PLCOPEN_DIR = os.path.join(EXPORTS_ROOT, "plcopen")
 PLCOPEN_ONEFILE_NAME = "PLC_latest.plcopen.xml"
 
 # -------------------------
-# Logging (one log per run)
+# Logging
 # -------------------------
 def _init_logging():
     if not os.path.isdir(LOG_DIR):
@@ -56,24 +44,18 @@ def _init_logging():
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = os.path.join(LOG_DIR, "plc_agent_%s.log" % ts)
-
     f = open(log_path, "a", buffering=1)
 
     class _Tee(object):
-        def __init__(self, *streams):
-            self.streams = streams
+        def __init__(self, *streams): self.streams = streams
         def write(self, s):
             for st in self.streams:
-                try:
-                    st.write(s)
-                except:
-                    pass
+                try: st.write(s)
+                except: pass
         def flush(self):
             for st in self.streams:
-                try:
-                    st.flush()
-                except:
-                    pass
+                try: st.flush()
+                except: pass
 
     sys.stdout = _Tee(sys.__stdout__, f)
     sys.stderr = _Tee(sys.__stderr__, f)
@@ -95,12 +77,7 @@ def _ensure_dir(p):
 # -------------------------
 def discover_projects(project_root_arg):
     project_root_arg = (project_root_arg or "").strip().strip('"')
-
-    if "*" in project_root_arg:
-        folder = os.path.dirname(project_root_arg)
-    else:
-        folder = project_root_arg
-
+    folder = os.path.dirname(project_root_arg) if "*" in project_root_arg else project_root_arg
     if not folder:
         folder = os.path.join(os.path.expanduser("~"), "Documents")
 
@@ -109,7 +86,6 @@ def discover_projects(project_root_arg):
 
     print("Scanning for .project files in:", folder)
     candidates = glob.glob(os.path.join(folder, "*.project"))
-
     if not candidates:
         raise Exception("No .project files found in: %s" % folder)
 
@@ -118,7 +94,6 @@ def discover_projects(project_root_arg):
         print(" -", os.path.basename(p))
 
     by_name = {os.path.basename(p).lower(): p for p in candidates}
-
     mapping = {
         "dev": by_name.get("plc_dev.project"),
         "staging": by_name.get("plc_stg.project"),
@@ -127,10 +102,7 @@ def discover_projects(project_root_arg):
 
     missing = [k for k, v in mapping.items() if not v]
     if missing:
-        raise Exception(
-            "Missing required projects: %s\nExpected: PLC_DEV.project / PLC_STG.project / PLC_PROD.project in %s"
-            % (", ".join(missing), folder)
-        )
+        raise Exception("Missing required projects: %s" % ", ".join(missing))
 
     return mapping
 
@@ -147,9 +119,7 @@ def _run_git(args):
             shell=False
         )
         out, err = p.communicate()
-        out_s = out.decode("utf-8", errors="replace")
-        err_s = err.decode("utf-8", errors="replace")
-        return p.returncode, out_s, err_s
+        return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
     except Exception as e:
         return 1, "", repr(e)
 
@@ -158,7 +128,7 @@ def _git_is_repo():
 
 def _git_has_origin():
     rc, out, err = _run_git(["remote"])
-    return (rc == 0) and ("origin" in out.split())
+    return rc == 0 and ("origin" in out.split())
 
 def _git_fetch():
     if not _git_has_origin():
@@ -166,18 +136,13 @@ def _git_fetch():
         return False
     rc, out, err = _run_git(["fetch", "origin"])
     if rc != 0:
-        print("GIT: fetch failed")
-        print(out); print(err)
+        print("GIT: fetch failed"); print(out); print(err)
         return False
     return True
 
 def _git_current_branch():
     rc, out, err = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
-    if rc == 0:
-        b = out.strip()
-        if b and b != "HEAD":
-            return b
-    return "unknown"
+    return out.strip() if rc == 0 else "unknown"
 
 def _git_checkout(branch):
     rc, out, err = _run_git(["checkout", branch])
@@ -186,8 +151,7 @@ def _git_checkout(branch):
     rc2, out2, err2 = _run_git(["checkout", "-B", branch, "origin/%s" % branch])
     if rc2 != 0:
         print("GIT: checkout failed for", branch)
-        print(out + out2)
-        print(err + err2)
+        print(out + out2); print(err + err2)
         return False
     return True
 
@@ -197,16 +161,11 @@ def _git_ensure_upstream(branch):
     rc, out, err = _run_git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
     if rc == 0 and out.strip() == ("origin/%s" % branch):
         return
-    rc2, out2, err2 = _run_git(["branch", "--set-upstream-to=origin/%s" % branch, branch])
-    if rc2 != 0:
-        print("GIT: could not set upstream for", branch)
-        print(out2); print(err2)
+    _run_git(["branch", "--set-upstream-to=origin/%s" % branch, branch])
 
 def _git_rev(ref):
     rc, out, err = _run_git(["rev-parse", ref])
-    if rc == 0:
-        return out.strip()
-    return ""
+    return out.strip() if rc == 0 else ""
 
 def _git_remote_has_new_commit(branch):
     local = _git_rev(branch)
@@ -223,58 +182,41 @@ def _git_fast_forward(branch):
         return False
     return True
 
-def _git_status_porcelain(path_rel):
-    rc, out, err = _run_git(["status", "--porcelain", "--", path_rel])
+def _git_status_porcelain():
+    rc, out, err = _run_git(["status", "--porcelain"])
     if rc != 0:
-        print("GIT: status porcelain error for", path_rel)
-        print(out); print(err)
+        print("GIT: status failed"); print(out); print(err)
         return ""
     return out.strip()
 
-def _git_is_tracked(path_rel):
-    rc, out, err = _run_git(["ls-files", "--error-unmatch", path_rel])
-    return rc == 0
+def _git_commit_all_if_dirty(branch, message):
+    """
+    Commit EVERYTHING in the repo (git add -A) if there are changes.
+    """
+    st = _git_status_porcelain()
+    if not st:
+        print("GIT: working tree clean (no commit needed).")
+        return True, "clean"
 
-def _git_has_diff_against_head(path_rel):
-    rc, out, err = _run_git(["diff", "HEAD", "--", path_rel])
-    if rc != 0:
-        print("GIT: diff HEAD error for", path_rel)
-        print(out); print(err)
-        return True, out
-    return (out.strip() != ""), out
+    print("GIT: changes detected -> committing entire repo")
+    print("GIT: status porcelain:\n%s" % st)
 
-def _git_cached_names():
-    rc, out, err = _run_git(["diff", "--cached", "--name-only"])
-    if rc != 0:
-        return []
-    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+    rc1, out1, err1 = _run_git(["add", "-A"])
+    if rc1 != 0:
+        print("GIT: add -A failed"); print(out1); print(err1)
+        return False, "git add -A failed"
 
-def _git_add_commit_push_only_file(rel_path, msg, branch):
-    rc, out, err = _run_git(["add", "-f", "--", rel_path])
-    if rc != 0:
-        print("GIT: add failed for", rel_path)
-        print(out); print(err)
-        return False, "git add failed"
-
-    staged = _git_cached_names()
-    if rel_path.replace("\\", "/") not in [x.replace("\\", "/") for x in staged]:
-        print("GIT: WARNING: file not staged after add:", rel_path)
-        print("GIT: staged files:", staged)
-        return False, "file not staged"
-
-    rc2, out2, err2 = _run_git(["commit", "-m", msg, "--", rel_path])
+    rc2, out2, err2 = _run_git(["commit", "-m", message])
     if rc2 != 0:
         if "nothing to commit" in (out2 + err2).lower():
             return True, "nothing to commit"
-        print("GIT: commit failed")
-        print(out2); print(err2)
+        print("GIT: commit failed"); print(out2); print(err2)
         return False, "git commit failed"
 
     if _git_has_origin():
         rc3, out3, err3 = _run_git(["push", "origin", branch])
         if rc3 != 0:
-            print("GIT: push failed for", branch)
-            print(out3); print(err3)
+            print("GIT: push failed"); print(out3); print(err3)
             return False, "git push failed"
 
     return True, "committed+push"
@@ -286,16 +228,12 @@ def normalize_plcopen_xml(path):
     try:
         with open(path, "rb") as f:
             raw = f.read()
-
         try:
-            text = raw.decode("utf-8-sig")
-            enc = "utf-8"
+            text = raw.decode("utf-8-sig"); enc = "utf-8"
         except:
-            text = raw.decode("latin-1")
-            enc = "latin-1"
+            text = raw.decode("latin-1"); enc = "latin-1"
 
         original = text
-
         text = re.sub(r'creationDateTime="[^"]+"', 'creationDateTime="1970-01-01T00:00:00"', text)
         text = re.sub(r'modificationDateTime="[^"]+"', 'modificationDateTime="1970-01-01T00:00:00"', text)
 
@@ -308,10 +246,7 @@ def normalize_plcopen_xml(path):
                     redirs.append(ln.strip())
             redirs = sorted(set(redirs))
             indent = "  "
-            if redirs:
-                new_block = "<PlaceholderRedirections>\n" + "\n".join([indent + r for r in redirs]) + "\n</PlaceholderRedirections>"
-            else:
-                new_block = "<PlaceholderRedirections>\n</PlaceholderRedirections>"
+            new_block = "<PlaceholderRedirections>\n" + "\n".join([indent + r for r in redirs]) + "\n</PlaceholderRedirections>" if redirs else "<PlaceholderRedirections>\n</PlaceholderRedirections>"
             text = text[:m.start()] + new_block + text[m.end():]
 
         if text != original:
@@ -323,16 +258,6 @@ def normalize_plcopen_xml(path):
     except Exception as e:
         print("WARNING: normalize_plcopen_xml failed:", repr(e))
 
-def _print_file_fingerprint(tag, path):
-    try:
-        import hashlib
-        sz = os.path.getsize(path)
-        with open(path, "rb") as f:
-            h = hashlib.sha256(f.read()).hexdigest()
-        print("%s: size=%d sha256=%s" % (tag, sz, h))
-    except Exception as e:
-        print("%s: fingerprint failed: %s" % (tag, repr(e)))
-
 # -------------------------
 # CODESYS helpers
 # -------------------------
@@ -340,10 +265,8 @@ def _close_projects_best_effort():
     try:
         p = projects.primary
         if p is not None and hasattr(p, "close"):
-            try:
-                p.close()
-            except:
-                pass
+            try: p.close()
+            except: pass
     except:
         pass
 
@@ -370,46 +293,35 @@ def _connect_and_login(app, user, pw, timeout_s):
 
     if user and pw:
         print("Online: injecting env credentials")
-        try:
-            online.set_specific_credentials(dev, user, pw)
-        except Exception as e:
-            print("WARNING: set_specific_credentials failed:", repr(e))
+        try: online.set_specific_credentials(dev, user, pw)
+        except Exception as e: print("WARNING: set_specific_credentials failed:", repr(e))
         if hasattr(dev, "set_credentials_for_initial_user"):
-            try:
-                dev.set_credentials_for_initial_user(user, pw)
-            except Exception as e:
-                print("WARNING: set_credentials_for_initial_user failed:", repr(e))
+            try: dev.set_credentials_for_initial_user(user, pw)
+            except Exception as e: print("WARNING: set_credentials_for_initial_user failed:", repr(e))
     else:
         print("Online: relying on stored credentials")
 
-    try:
-        if hasattr(dev, "connected") and dev.connected:
-            print("Online: already connected")
-        else:
-            print("Online: connecting...")
-            dev.connect()
-    except Exception as e:
-        raise Exception("dev.connect failed: %s" % repr(e))
+    if hasattr(dev, "connected") and getattr(dev, "connected"):
+        print("Online: already connected")
+    else:
+        print("Online: connecting...")
+        dev.connect()
 
     start = time.time()
     while (time.time() - start) < timeout_s:
-        if hasattr(dev, "connected") and dev.connected:
+        if hasattr(dev, "connected") and getattr(dev, "connected"):
             break
         time.sleep(0.5)
 
-    if not (hasattr(dev, "connected") and dev.connected):
+    if not (hasattr(dev, "connected") and getattr(dev, "connected")):
         raise Exception("Device did not connect within timeout")
 
     if not online_app.is_logged_in:
-        if "OnlineChangeOption" not in globals():
+        OnlineChangeOption = globals().get("OnlineChangeOption", None)
+        if OnlineChangeOption is None:
             raise Exception("OnlineChangeOption not found in globals()")
-        OnlineChangeOption = globals()["OnlineChangeOption"]
         print("Online: login (Keep)")
-        try:
-            online_app.login(OnlineChangeOption.Keep, False)
-        except Exception as e:
-            raise Exception("online_app.login failed: %s" % repr(e))
-
+        online_app.login(OnlineChangeOption.Keep, False)
         if not online_app.is_logged_in:
             raise Exception("Login failed")
 
@@ -417,7 +329,7 @@ def _connect_and_login(app, user, pw, timeout_s):
 
 def _disconnect_best_effort(online_app, dev):
     try:
-        if hasattr(dev, "connected") and dev.connected and hasattr(dev, "disconnect"):
+        if hasattr(dev, "connected") and getattr(dev, "connected") and hasattr(dev, "disconnect"):
             dev.disconnect()
     except:
         pass
@@ -434,14 +346,12 @@ def _try_download_to_controller(online_app):
 
     method_names = ["download", "application_download", "program_download"]
     opt_names = ["Download", "FullDownload", "All", "Keep"]
-
     last_err = "n/a"
 
     for m in method_names:
         if not hasattr(online_app, m):
             continue
         fn = getattr(online_app, m)
-
         for opt_name in opt_names:
             if hasattr(OnlineChangeOption, opt_name):
                 opt = getattr(OnlineChangeOption, opt_name)
@@ -450,7 +360,6 @@ def _try_download_to_controller(online_app):
                     return True, "online_app.%s(%s)" % (m, opt_name)
                 except Exception as e:
                     last_err = repr(e)
-
         try:
             fn()
             return True, "online_app.%s()" % m
@@ -460,13 +369,13 @@ def _try_download_to_controller(online_app):
     return False, "no working download method (last_err=%s)" % last_err
 
 # -------------------------
-# Branch actions
+# Actions
 # -------------------------
-def run_capture(branch, project_path, user, pw):
-    plc_name = BRANCH_TO_PLCNAME.get(branch, branch.upper())
+def run_capture_dev(project_path, user, pw):
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    plc_name = "PLC_DEV"
 
-    out_arch = os.path.join(EXPORTS_ROOT, "archives", branch)
+    out_arch = os.path.join(EXPORTS_ROOT, "archives", "dev")
     _ensure_dir(out_arch)
     _ensure_dir(PLCOPEN_DIR)
 
@@ -476,83 +385,36 @@ def run_capture(branch, project_path, user, pw):
         return False, "active_application timeout"
 
     online_app, dev = _connect_and_login(app, user, pw, TIMEOUT_S)
-
     try:
         if hasattr(online_app, "source_download"):
-            print("[%s] CAPTURE: source_download" % branch)
+            print("[dev] CAPTURE: source_download")
             online_app.source_download()
-        elif hasattr(online_app, "source_upload"):
-            print("[%s] CAPTURE: source_upload" % branch)
-            online_app.source_upload()
-        else:
-            print("[%s] CAPTURE: no source pull method found" % branch)
 
         archive_path = os.path.join(out_arch, "%s_%s.projectarchive" % (plc_name, ts))
-        print("[%s] CAPTURE: saving archive -> %s" % (branch, archive_path))
+        print("[dev] CAPTURE: saving archive -> %s" % archive_path)
         if hasattr(proj, "save_archive"):
             proj.save_archive(archive_path)
-        else:
-            print("[%s] CAPTURE: proj.save_archive not available" % branch)
 
-        # ONE PLCopen file for everything (overwritten)
         plcopen_latest = os.path.join(PLCOPEN_DIR, PLCOPEN_ONEFILE_NAME)
 
         class ER(ExportReporter):
-            def error(self, obj, message):
-                print("PLCOPEN export ERROR on %s: %s" % (obj, message))
-            def warning(self, obj, message):
-                print("PLCOPEN export WARNING on %s: %s" % (obj, message))
-            def nonexportable(self, obj):
-                print("PLCOPEN not exportable: %s" % obj)
+            def error(self, obj, message): print("PLCOPEN export ERROR on %s: %s" % (obj, message))
+            def warning(self, obj, message): print("PLCOPEN export WARNING on %s: %s" % (obj, message))
+            def nonexportable(self, obj): print("PLCOPEN not exportable: %s" % obj)
             @property
-            def aborting(self):
-                return False
+            def aborting(self): return False
 
         reporter = ER()
 
-        print("[%s] CAPTURE: exporting PLCopen -> %s" % (branch, plcopen_latest))
-        export_ok = False
-        try:
-            app_obj = proj.active_application
-            app_obj.export_xml(reporter, plcopen_latest, recursive=True)
-            export_ok = True
-        except Exception as e:
-            print("[%s] CAPTURE: app.export_xml failed: %s" % (branch, repr(e)))
-
-        if not export_ok:
-            try:
-                proj.export_xml(reporter, proj.get_children(False), plcopen_latest, recursive=True)
-                export_ok = True
-            except Exception as e:
-                print("[%s] CAPTURE: proj.export_xml failed: %s" % (branch, repr(e)))
-
-        if not export_ok:
-            return False, "PLCopen export failed"
+        print("[dev] CAPTURE: exporting PLCopen -> %s" % plcopen_latest)
+        proj.active_application.export_xml(reporter, plcopen_latest, recursive=True)
 
         normalize_plcopen_xml(plcopen_latest)
-        _print_file_fingerprint("[%s] PLCOPEN" % branch, plcopen_latest)
 
-        rel_xml = os.path.relpath(plcopen_latest, REPO_ROOT).replace("\\", "/")
-
-        status_line = _git_status_porcelain(rel_xml)
-        tracked = _git_is_tracked(rel_xml)
-
-        print("[%s] GIT: rel_xml=%s" % (branch, rel_xml))
-        print("[%s] GIT: tracked=%s status='%s'" % (branch, tracked, status_line))
-
-        if not tracked:
-            has_diff = True
-        else:
-            has_diff, _ = _git_has_diff_against_head(rel_xml)
-
-        if not has_diff and status_line == "":
-            return True, "capture ok (no diff)"
-
-        msg = "%s export %s" % (plc_name, ts)
-        ok, note = _git_add_commit_push_only_file(rel_xml, msg, branch)
-        if ok:
-            return True, "capture committed (%s)" % note
-        return False, "capture git failed (%s)" % note
+        # Commit entire repo if anything changed
+        msg = "DEV capture %s" % ts
+        ok, note = _git_commit_all_if_dirty("dev", msg)
+        return (ok, note) if ok else (False, note)
 
     finally:
         _disconnect_best_effort(online_app, dev)
@@ -581,18 +443,10 @@ def run_deploy(branch, project_path, user, pw):
         return False, "active_application timeout"
 
     online_app, dev = _connect_and_login(app, user, pw, TIMEOUT_S)
-
     try:
         ok, used = _try_download_to_controller(online_app)
         if not ok:
             return False, "download failed (%s)" % used
-
-        try:
-            if hasattr(online_app, "start"):
-                online_app.start()
-        except:
-            pass
-
         return True, "deployed (%s)" % used
     finally:
         _disconnect_best_effort(online_app, dev)
@@ -603,9 +457,6 @@ def run_deploy(branch, project_path, user, pw):
 def main():
     if len(sys.argv) < 2:
         print("ERROR: Missing project folder/path argument.")
-        print('Usage examples:')
-        print('  --scriptargs:"C:\\Users\\Test_bench\\Documents"')
-        print('  --scriptargs:"C:\\Users\\Test_bench\\Documents\\*.project"')
         system.exit()
 
     project_arg = sys.argv[1]
@@ -623,9 +474,6 @@ def main():
         print("ERROR: No .git folder found in", REPO_ROOT)
         system.exit()
 
-    if not _git_has_origin():
-        print("WARNING: No 'origin' remote configured. Deploy branches will not update.")
-
     start_branch = _git_current_branch()
     print("Starting branch:", start_branch)
 
@@ -634,34 +482,43 @@ def main():
     summary = {}
     overall_ok = True
 
-    for branch in BRANCHES:
+    # DEV
+    print("\n" + "=" * 70)
+    print("BRANCH: dev")
+    print("=" * 70)
+    try:
+        if not _git_checkout("dev"):
+            summary["dev"] = ("FAIL", "checkout failed")
+            overall_ok = False
+        else:
+            _git_ensure_upstream("dev")
+            ok, msg = run_capture_dev(projects_map["dev"], user, pw)
+            summary["dev"] = ("OK" if ok else "FAIL", msg)
+            if not ok:
+                overall_ok = False
+    except Exception as e:
+        overall_ok = False
+        summary["dev"] = ("FAIL", "exception: %s" % repr(e))
+        traceback.print_exc()
+
+    # STAGING + PROD
+    for branch in ["staging", "prod"]:
         print("\n" + "=" * 70)
         print("BRANCH:", branch)
         print("=" * 70)
-
         try:
             if not _git_checkout(branch):
                 summary[branch] = ("FAIL", "checkout failed")
                 overall_ok = False
                 continue
-
             _git_ensure_upstream(branch)
-
-            project_path = projects_map[branch]
-
-            if branch == "dev":
-                ok, msg = run_capture(branch, project_path, user, pw)
-            else:
-                ok, msg = run_deploy(branch, project_path, user, pw)
-
+            ok, msg = run_deploy(branch, projects_map[branch], user, pw)
             summary[branch] = ("OK" if ok else "FAIL", msg)
             if not ok:
                 overall_ok = False
-
         except Exception as e:
             overall_ok = False
             summary[branch] = ("FAIL", "exception: %s" % repr(e))
-            print("EXCEPTION:")
             traceback.print_exc()
 
     try:
