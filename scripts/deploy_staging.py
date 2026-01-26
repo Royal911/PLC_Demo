@@ -1,12 +1,7 @@
 # encoding: utf-8
-# DEPLOY STAGING: Git (staging branch) -> PLC STG runtime
+# DEPLOY STAGING: Git (staging branch) -> import PLCopen XML -> build -> boot app -> start if needed
 #
-# Your environment:
-# - online_app exposes create_boot_application() (no download/program_download methods)
-# - After create_boot_application(), your runtime leaves the application STOPPED
-# - This script explicitly STARTS the application after boot creation (best-effort)
-#
-# Usage (CODESYS headless):
+# Usage:
 # --runscript="C:\PLC_REPO\scripts\deploy_staging.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_STG.project"
 
 import os
@@ -14,10 +9,54 @@ import sys
 import time
 import subprocess
 import traceback
+import hashlib
+
+# Reduce noisy CODESYS embedded-python warning threads
+try:
+    import warnings
+    warnings.filterwarnings("ignore")
+except:
+    pass
 
 REPO_ROOT = r"C:\PLC_REPO"
 TIMEOUT_S = 120
 BRANCH = "staging"
+
+# Your single “latest” file (committed to Git)
+PLCOPEN_XML = os.path.join(REPO_ROOT, "exports", "plcopen", "PLC_latest.plcopen.xml")
+
+
+# -------------------------
+# Small utilities
+# -------------------------
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(1024 * 1024)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+def _list_methods(obj, label, contains=None):
+    try:
+        names = []
+        for n in dir(obj):
+            ln = n.lower()
+            if contains is None:
+                names.append(n)
+            else:
+                for c in contains:
+                    if c in ln:
+                        names.append(n)
+                        break
+        print(label, "type:", type(obj))
+        print(label, "methods matching:", contains)
+        for n in sorted(set(names)):
+            print(" -", n)
+    except Exception as e:
+        print("WARN:", label, "method listing failed:", repr(e))
 
 
 # -------------------------
@@ -106,7 +145,6 @@ def _connect_and_login(app, user, pw):
     else:
         print("Online: relying on stored credentials")
 
-    # Connect (retry - gateway can be flaky in headless)
     last_err = None
     for attempt in range(1, 4):
         try:
@@ -130,7 +168,6 @@ def _connect_and_login(app, user, pw):
     if not (hasattr(dev, "connected") and dev.connected):
         raise Exception("Device did not connect (last_err=%s)" % repr(last_err))
 
-    # Login
     if not online_app.is_logged_in:
         OnlineChangeOption = globals().get("OnlineChangeOption", None)
         if OnlineChangeOption is None:
@@ -157,105 +194,134 @@ def _disconnect_best_effort(online_app, dev):
 
 
 # -------------------------
-# Deploy logic
+# PLCopen import (critical part)
 # -------------------------
-def _list_methods(obj, label):
-    try:
-        names = []
-        for n in dir(obj):
-            ln = n.lower()
-            if (
-                "download" in ln
-                or "boot" in ln
-                or "create" in ln
-                or "start" in ln
-                or "stop" in ln
-                or "reset" in ln
-                or "restart" in ln
-                or "run" in ln
-                or "application" in ln
-            ):
-                names.append(n)
-        print(label, "type:", type(obj))
-        print(label, "methods containing download/boot/create/start/stop/reset/restart/run/application:")
-        for n in sorted(names):
-            print(" -", n)
-    except Exception as e:
-        print(label, "method listing failed:", repr(e))
+def _import_plcopen_into_project(proj, app, xml_path):
+    """
+    Import PLCopen XML into the opened project BEFORE deploying.
+    CODESYS scripting APIs vary, so we try several import entry points.
+
+    Returns (ok: bool, used: str)
+    """
+    if not os.path.isfile(xml_path):
+        return False, "PLCopen XML not found: %s" % xml_path
+
+    size = os.path.getsize(xml_path)
+    sha = _sha256(xml_path)
+    print("PLCOPEN: using:", xml_path)
+    print("PLCOPEN: size=%s sha256=%s" % (size, sha))
+
+    # Show relevant methods for quick debugging
+    _list_methods(app, "ActiveApplication", contains=["import", "xml"])
+    _list_methods(proj, "Project", contains=["import", "xml"])
+    _list_methods(projects, "projects module", contains=["import", "xml"])
+
+    last_err = None
+
+    # Helper: best effort save after import
+    def _save_best_effort():
+        try:
+            if hasattr(proj, "save"):
+                proj.save()
+                print("Project saved.")
+        except Exception as e:
+            print("WARN: project save failed:", repr(e))
+
+    # Attempt 1: app.import_xml(xml_path, ...)
+    if hasattr(app, "import_xml"):
+        try:
+            # Some versions: import_xml(path, recursive=True)
+            try:
+                app.import_xml(xml_path, recursive=True)
+                _save_best_effort()
+                return True, "app.import_xml(path, recursive=True)"
+            except TypeError:
+                pass
+
+            # Some versions: import_xml(path)
+            app.import_xml(xml_path)
+            _save_best_effort()
+            return True, "app.import_xml(path)"
+        except Exception as e:
+            last_err = e
+            print("PLCOPEN import attempt app.import_xml failed:", repr(e))
+
+    # Attempt 2: proj.import_xml(...)
+    if hasattr(proj, "import_xml"):
+        try:
+            # Some versions: proj.import_xml(path, recursive=True)
+            try:
+                proj.import_xml(xml_path, recursive=True)
+                _save_best_effort()
+                return True, "proj.import_xml(path, recursive=True)"
+            except TypeError:
+                pass
+
+            proj.import_xml(xml_path)
+            _save_best_effort()
+            return True, "proj.import_xml(path)"
+        except Exception as e:
+            last_err = e
+            print("PLCOPEN import attempt proj.import_xml failed:", repr(e))
+
+    # Attempt 3: projects.import_xml(...)
+    if hasattr(projects, "import_xml"):
+        try:
+            projects.import_xml(xml_path)
+            _save_best_effort()
+            return True, "projects.import_xml(path)"
+        except Exception as e:
+            last_err = e
+            print("PLCOPEN import attempt projects.import_xml failed:", repr(e))
+
+    return False, "No working PLCopen import method (last_err=%s)" % repr(last_err)
 
 
-def _start_after_boot(online_app):
-    """
-    After create_boot_application(), many runtimes end up STOPPED.
-    We try a few common "start/run" methods, and optionally reset/restart.
-    """
-    # state (if available)
+# -------------------------
+# Deploy via boot application + start if needed
+# -------------------------
+def _start_if_needed(online_app):
+    state = None
     try:
         if hasattr(online_app, "application_state"):
-            print("Application state (before):", online_app.application_state)
+            state = online_app.application_state
+            print("Application state (before):", state)
     except Exception as e:
         print("WARN: reading application_state failed:", repr(e))
 
-    # Try start/run methods first
-    started = False
-    for m in ["start", "run", "start_application"]:
-        if hasattr(online_app, m):
-            try:
-                getattr(online_app, m)()
-                print("DEPLOY: called online_app.%s()" % m)
-                started = True
-                break
-            except Exception as e:
-                print("DEPLOY: online_app.%s() failed:" % m, repr(e))
+    # If already running, don't start
+    try:
+        if state is not None and str(state).lower().endswith(".run"):
+            print("Application already RUNNING. No start needed.")
+            return True
+    except:
+        pass
 
-    # If start didn't work, try reset/restart then start again
-    if not started:
-        for m in ["reset", "restart"]:
-            if hasattr(online_app, m):
-                try:
-                    getattr(online_app, m)()
-                    print("DEPLOY: called online_app.%s()" % m)
-                except Exception as e:
-                    print("DEPLOY: online_app.%s() failed:" % m, repr(e))
+    if hasattr(online_app, "start"):
+        try:
+            online_app.start()
+            print("DEPLOY: called online_app.start()")
+        except Exception as e:
+            print("DEPLOY: online_app.start() failed:", repr(e))
 
-        for m in ["start", "run", "start_application"]:
-            if hasattr(online_app, m):
-                try:
-                    getattr(online_app, m)()
-                    print("DEPLOY: called online_app.%s() (post reset/restart)" % m)
-                    started = True
-                    break
-                except Exception as e:
-                    print("DEPLOY: online_app.%s() failed (post reset/restart):" % m, repr(e))
-
-    # state (if available)
     try:
         if hasattr(online_app, "application_state"):
             print("Application state (after):", online_app.application_state)
     except Exception as e:
         print("WARN: reading application_state failed:", repr(e))
 
-    if not started:
-        print("WARNING: No supported start/run method worked (application may remain stopped).")
+    return True
 
 
 def _deploy_via_boot_application(online_app):
-    """
-    Your environment supports create_boot_application() and not the usual download APIs.
-    """
-    _list_methods(online_app, "OnlineApp")
-
     if not hasattr(online_app, "create_boot_application"):
         return False, "create_boot_application not available"
 
     try:
         online_app.create_boot_application()
         print("DEPLOY: SUCCESS via OnlineApp.create_boot_application()")
-
-        # REQUIRED for your runtime: start the application after boot is created
-        _start_after_boot(online_app)
-
-        return True, "OnlineApp.create_boot_application() + start"
+        _start_if_needed(online_app)
+        return True, "OnlineApp.create_boot_application()"
     except Exception as e:
         return False, "create_boot_application failed: %s" % repr(e)
 
@@ -272,10 +338,18 @@ def main():
     project_path = sys.argv[1].strip().strip('"')
     print("STG project:", project_path)
 
+    # 1) Update local repo to latest staging
     if not _git_checkout_and_update(BRANCH):
         print("ERROR: git checkout/pull failed")
         system.exit()
 
+    # 2) Ensure PLCopen XML exists in this branch
+    if not os.path.isfile(PLCOPEN_XML):
+        print("ERROR: PLCopen XML not found:", PLCOPEN_XML)
+        print("Tip: make sure PLC_latest.plcopen.xml is committed and merged into staging.")
+        system.exit()
+
+    # 3) Open project
     user = os.environ.get("CODESYS_USER", "")
     pw = os.environ.get("CODESYS_PASS", "")
 
@@ -285,14 +359,21 @@ def main():
         print("ERROR: active_application timeout")
         system.exit()
 
-    online_app, dev = _connect_and_login(app, user, pw)
+    # 4) IMPORT PLCopen into the STG project (this is the missing step)
+    ok_imp, used_imp = _import_plcopen_into_project(proj, app, PLCOPEN_XML)
+    if not ok_imp:
+        print("ERROR: PLCopen import failed:", used_imp)
+        system.exit()
+    print("PLCOPEN import OK:", used_imp)
 
+    # 5) Connect + deploy
+    online_app, dev = _connect_and_login(app, user, pw)
     try:
-        ok, used = _deploy_via_boot_application(online_app)
-        if not ok:
-            print("ERROR: deploy failed:", used)
+        ok_dep, used_dep = _deploy_via_boot_application(online_app)
+        if not ok_dep:
+            print("ERROR: deploy failed:", used_dep)
             system.exit()
-        print("DEPLOY OK:", used)
+        print("DEPLOY OK:", used_dep)
     finally:
         _disconnect_best_effort(online_app, dev)
 
