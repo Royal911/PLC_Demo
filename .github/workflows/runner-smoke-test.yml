@@ -1,0 +1,26 @@
+name: Runner Smoke Test
+
+on:
+  push:
+    branches: [ "dev" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - name: Who am I
+        shell: cmd
+        run: whoami
+
+      - name: Git version
+        shell: cmd
+        run: git --version
+
+      - name: Can I see PLC_REPO
+        shell: cmd
+        run: dir C:\PLC_REPO
+
+      - name: CODESYS exists
+        shell: cmd
+        run: dir "C:\Program Files\CODESYS 3.5.21.40\CODESYS\Common\CODESYS.exe"
