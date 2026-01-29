@@ -1116,29 +1116,28 @@ END_CASE
               <Library Name="#CAA Device Diagnosis" Namespace="DED" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="true" LinkAllContent="false" DefaultResolution="CAA Device Diagnosis, 3.5.21.0 (CAA Technical Workgroup)" />
               <Library Name="#SysProcess" Namespace="SysProcess" HideWhenReferencedAsDependency="false" PublishSymbolsInContainer="false" SystemLibrary="false" LinkAllContent="false" DefaultResolution="SysProcess, * (System)" />
               <PlaceholderRedirections>
-  <PlaceholderRedirection Placeholder="Collections" Redirection="Collections, 3.5.17.0 (System)" />
-  <PlaceholderRedirection Placeholder="IoDrvProfinetBase" Redirection="IoDrvProfinetBase, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="IoDrvProfinetDevice" Redirection="IoDrvProfinetDevice, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="Profinet" Redirection="Profinet, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="ProfinetCommon" Redirection="ProfinetCommon, 4.7.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="ProfinetDevice" Redirection="ProfinetDevice, 4.6.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="RPC" Redirection="Remote Procedure Calls, 4.6.0.0 (CODESYS)" />
-  <PlaceholderRedirection Placeholder="Standard" Redirection="Standard, 3.5.18.0 (System)" />
-  <PlaceholderRedirection Placeholder="StringUtils" Redirection="StringUtils, 3.5.20.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElem3DPath" Redirection="VisuElem3DPath, 4.7.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemCamDisplayer" Redirection="VisuElemCamDisplayer, 4.7.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemMeter" Redirection="VisuElemMeter, 4.7.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemTextEditor" Redirection="VisuElemTextEditor, 4.8.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemTrace" Redirection="VisuElemTrace, 4.8.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemXYChart" Redirection="VisuElemXYChart, 4.8.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElems" Redirection="VisuElems, 4.8.1.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemsAlarm" Redirection="VisuElemsAlarm, 4.8.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemsDateTime" Redirection="VisuElemsDateTime, 4.8.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemsSpecialControls" Redirection="VisuElemsSpecialControls, 4.7.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuElemsWinControls" Redirection="VisuElemsWinControls, 4.8.1.0 (System)" />
-  <PlaceholderRedirection Placeholder="System_VisuNativeControl" Redirection="VisuNativeControl, 4.8.0.0 (System)" />
-  <PlaceholderRedirection Placeholder="Util" Redirection="Util, 3.5.21.0 (System)" />
-  <PlaceholderRedirections>
+        <PlaceholderRedirection Placeholder="Collections" Redirection="Collections, 3.5.17.0 (System)" />
+        <PlaceholderRedirection Placeholder="IoDrvProfinetBase" Redirection="IoDrvProfinetBase, 4.7.0.0 (CODESYS)" />
+        <PlaceholderRedirection Placeholder="IoDrvProfinetDevice" Redirection="IoDrvProfinetDevice, 4.7.0.0 (CODESYS)" />
+        <PlaceholderRedirection Placeholder="Profinet" Redirection="Profinet, 4.7.0.0 (CODESYS)" />
+        <PlaceholderRedirection Placeholder="ProfinetCommon" Redirection="ProfinetCommon, 4.7.0.0 (CODESYS)" />
+        <PlaceholderRedirection Placeholder="ProfinetDevice" Redirection="ProfinetDevice, 4.6.0.0 (CODESYS)" />
+        <PlaceholderRedirection Placeholder="RPC" Redirection="Remote Procedure Calls, 4.6.0.0 (CODESYS)" />
+        <PlaceholderRedirection Placeholder="Standard" Redirection="Standard, 3.5.18.0 (System)" />
+        <PlaceholderRedirection Placeholder="StringUtils" Redirection="StringUtils, 3.5.20.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElem3DPath" Redirection="VisuElem3DPath, 4.7.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemCamDisplayer" Redirection="VisuElemCamDisplayer, 4.7.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemMeter" Redirection="VisuElemMeter, 4.7.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemTextEditor" Redirection="VisuElemTextEditor, 4.8.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemTrace" Redirection="VisuElemTrace, 4.8.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemXYChart" Redirection="VisuElemXYChart, 4.8.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElems" Redirection="VisuElems, 4.8.1.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemsAlarm" Redirection="VisuElemsAlarm, 4.8.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemsDateTime" Redirection="VisuElemsDateTime, 4.8.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemsSpecialControls" Redirection="VisuElemsSpecialControls, 4.7.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuElemsWinControls" Redirection="VisuElemsWinControls, 4.8.1.0 (System)" />
+        <PlaceholderRedirection Placeholder="System_VisuNativeControl" Redirection="VisuNativeControl, 4.8.0.0 (System)" />
+        <PlaceholderRedirection Placeholder="Util" Redirection="Util, 3.5.21.0 (System)" />
 </PlaceholderRedirections>
               <addData />
             </Libraries>

@@ -6,10 +6,10 @@
 # - Save archive (timestamped) to exports\archives\dev\
 # - Copy that archive to ONE stable file: exports\archives\PLC_latest.projectarchive
 # - Export ONE PLCopen XML (overwritten): exports\plcopen\PLC_latest.plcopen.xml
-# - Normalize PLCopen (remove volatile timestamps + stable PlaceholderRedirections)
+# - Normalize PLCopen (remove volatile timestamps + CANONICALIZE PlaceholderRedirections so it won't diff)
 # - Commit ENTIRE repo if dirty (git add -A) and push to origin/dev
 #
-# Usage:
+# Run:
 # "C:\Program Files\CODESYS 3.5.21.40\CODESYS\Common\CODESYS.exe" --noUI --profile="CODESYS V3.5 SP21 Patch 4" --runscript="C:\PLC_REPO\scripts\dev_capture.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_DEV.project"
 # ============================================================
 
@@ -165,13 +165,16 @@ def _git_commit_all_if_dirty(branch, message):
 
 
 # -------------------------
-# PLCopen normalization (keep your behavior)
+# PLCopen normalization
+# - remove timestamps
+# - canonicalize PlaceholderRedirections (extract -> normalize -> sort -> rebuild)
 # -------------------------
 def normalize_plcopen_xml(path):
     try:
         with open(path, "rb") as f:
             raw = f.read()
 
+        # BOM-safe decode
         try:
             text = raw.decode("utf-8-sig"); enc = "utf-8"
         except:
@@ -179,32 +182,59 @@ def normalize_plcopen_xml(path):
 
         original = text
 
-        # remove volatile header timestamps
+        # 1) Ignore volatile header timestamps
         text = re.sub(r'creationDateTime="[^"]+"', 'creationDateTime="1970-01-01T00:00:00"', text)
         text = re.sub(r'modificationDateTime="[^"]+"', 'modificationDateTime="1970-01-01T00:00:00"', text)
 
-        # stable PlaceholderRedirections
-        m = re.search(r"<PlaceholderRedirections>.*?</PlaceholderRedirections>", text, flags=re.DOTALL)
+        # 2) Canonicalize PlaceholderRedirections block
+        block_re = re.compile(r"<PlaceholderRedirections\b[^>]*>.*?</PlaceholderRedirections>", re.DOTALL)
+        m = block_re.search(text)
+
         if m:
             block = m.group(0)
-            redirs = []
-            for ln in block.splitlines():
-                if "<PlaceholderRedirection" in ln:
-                    redirs.append(ln.strip())
-            redirs = sorted(set(redirs))
-            indent = "  "
-            if redirs:
-                new_block = "<PlaceholderRedirections>\n" + "\n".join([indent + r for r in redirs]) + "\n</PlaceholderRedirections>"
+
+            # Find all <PlaceholderRedirection ... /> tags
+            tag_re = re.compile(r"<PlaceholderRedirection\b[^>]*/\s*>")
+            tags = tag_re.findall(block)
+
+            canon = []
+            for t in tags:
+                tt = re.sub(r"\s+", " ", t.strip())        # collapse whitespace
+                tt = re.sub(r"\s*/\s*>", " />", tt)        # normalize closing
+                canon.append(tt)
+
+            # Sort by Placeholder="..."
+            def _key(tag):
+                mm = re.search(r'Placeholder="([^"]+)"', tag)
+                return mm.group(1) if mm else tag
+
+            canon = sorted(set(canon), key=_key)
+
+            # Rebuild deterministically (indent does not need to match original exactly)
+            inner_indent = "        "  # 8 spaces (looks nice & stable)
+            if canon:
+                new_block = "<PlaceholderRedirections>\n" + \
+                            "\n".join([inner_indent + t for t in canon]) + \
+                            "\n</PlaceholderRedirections>"
             else:
                 new_block = "<PlaceholderRedirections>\n</PlaceholderRedirections>"
+
             text = text[:m.start()] + new_block + text[m.end():]
+
+        # Also handle self-closing <PlaceholderRedirections/>
+        text = re.sub(
+            r"<PlaceholderRedirections\b[^>]*/>",
+            "<PlaceholderRedirections>\n</PlaceholderRedirections>",
+            text
+        )
 
         if text != original:
             with open(path, "wb") as f:
                 f.write(text.encode(enc, errors="replace"))
-            print("PLCOPEN: normalized volatile metadata.")
+            print("PLCOPEN: normalized volatile metadata (timestamps + PlaceholderRedirections canonicalized).")
         else:
             print("PLCOPEN: already stable/normalized.")
+
     except Exception as e:
         print("WARNING: normalize_plcopen_xml failed:", repr(e))
 
