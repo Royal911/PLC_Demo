@@ -112,7 +112,12 @@ def _open_project_primary(project_path):
     _close_projects_best_effort()
     proj = projects.primary
     if proj is None:
-        proj = projects.open(project_path, primary=True)
+        proj = projects.open(project_path)
+        print("proj type:", type(proj))
+        print("projects.primary:", projects.primary)
+        print("proj.active_application:", getattr(proj, "active_application", None))
+        print("project children:", len(proj.get_children(True)) if hasattr(proj, "get_children") else "n/a")
+
     return proj
 
 
