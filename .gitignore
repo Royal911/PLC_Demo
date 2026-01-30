@@ -2,8 +2,17 @@
 Logs/
 *.log
 
-# keep archives out of normal diffs (optional: keep only recent ones)
-exports/archives/
+# archives: ignore all...
+exports/archives/*
+
+# ...but keep the single promotion artifact tracked
+!exports/archives/PLC_latest.projectarchive
+
+# plcopen: ignore all...
+exports/plcopen/*
+
+# ...but keep one stable diff file tracked (DEV only)
+!exports/plcopen/DEV.plcopen.xml
 
 # OS/editor
 Thumbs.db
@@ -11,7 +20,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# secrets (if you ever add any)
+# secrets
 *.secret
 *.env
-
