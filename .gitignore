@@ -22,4 +22,8 @@ Thumbs.db
 
 # secrets
 *.secret
+<<<<<<< HEAD
 *.env
+=======
+*.env
+>>>>>>> dev
