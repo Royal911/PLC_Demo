@@ -1,16 +1,19 @@
 # encoding: utf-8
 # ============================================================
-# dev_capture.py  (DEV: PLC -> Git)  [STABLE CHANGE DETECTION]
+# dev_capture.py  (DEV: PLC -> Git)  [STABLE CHANGE DETECTION + COMMIT SCRIPTS]
 #
 # - Pull source from PLC (source_download)
 # - Save archive (timestamped) to exports\archives\dev\
 # - Export PLCopen XML to TEMP file
 # - Normalize TEMP PLCopen (remove timestamps + canonicalize PlaceholderRedirections)
 # - Compare TEMP vs stable exports\plcopen\PLC_latest.plcopen.xml
-#     - If SAME: do NOT update stable files, do NOT commit (prevents noise)
+#     - If SAME:
+#         - do NOT update stable PLCopen
+#         - do NOT update stable archive exports\archives\PLC_latest.projectarchive
+#         - BUT: if repo has meaningful changes (scripts/workflows/etc), commit + push
 #     - If DIFFERENT:
 #         - overwrite stable PLCopen file
-#         - overwrite stable archive: exports\archives\PLC_latest.projectarchive
+#         - overwrite stable archive exports\archives\PLC_latest.projectarchive
 #         - commit ENTIRE repo if dirty (git add -A) and push to origin/dev
 #
 # Run:
@@ -157,6 +160,49 @@ def _git_status_porcelain():
         print(out); print(err)
         return ""
     return out.strip()
+
+def _git_dirty_paths():
+    """
+    Returns a list of changed paths from `git status --porcelain`.
+    """
+    st = _git_status_porcelain()
+    if not st:
+        return []
+    paths = []
+    for line in st.splitlines():
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        p = line[3:].strip()
+        if " -> " in p:
+            p = p.split(" -> ", 1)[1].strip()
+        paths.append(p)
+    return paths
+
+def _is_only_noise_changes(paths):
+    """
+    Treat these as noise (won't trigger commit if PLC unchanged):
+      - Logs/
+      - exports/archives/dev/<timestamp>.projectarchive
+      - exports/plcopen/PLC_tmp.plcopen.xml
+    Everything else counts as real (scripts/workflows/etc).
+    """
+    noise_prefixes = (
+        "Logs/",
+        "exports/archives/dev/",
+    )
+    noise_files = set([
+        "exports/plcopen/PLC_tmp.plcopen.xml",
+    ])
+
+    for p in paths:
+        p = p.replace("\\", "/")
+        if p in noise_files:
+            continue
+        if p.startswith(noise_prefixes):
+            continue
+        return False
+    return True
 
 def _git_commit_all_if_dirty(branch, message):
     st = _git_status_porcelain()
@@ -406,7 +452,7 @@ def main():
         else:
             print("[dev] CAPTURE: no source pull method found")
 
-        # Save timestamped archive (ALWAYS ok; but stable archive updated only if PLCopen changed)
+        # Save timestamped archive (ALWAYS ok; stable archive updated only if PLCopen changed)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         archive_path = os.path.join(ARCHIVE_DIR, "%s_%s.projectarchive" % (PLC_NAME, ts))
 
@@ -461,24 +507,46 @@ def main():
 
         normalize_plcopen_xml(PLCOPEN_TMP)
 
-        # Decide if REAL change happened
+        # Decide if REAL PLC change happened
         plcopen_changed = True
         if os.path.isfile(PLCOPEN_LATEST):
             plcopen_changed = not _files_equal(PLCOPEN_TMP, PLCOPEN_LATEST)
 
         print("[dev] PLCOPEN changed:", plcopen_changed)
 
+        # Check if repo has meaningful changes (scripts/workflows/etc)
+        dirty_paths = _git_dirty_paths()
+        print("[dev] Git dirty paths:", dirty_paths if dirty_paths else "[]")
+        only_noise = _is_only_noise_changes(dirty_paths)
+
         if not plcopen_changed:
-            print("[dev] No real PLC change detected. NOT updating stable XML or stable archive. Skipping git commit.")
+            # Clean up temp file
             try:
                 os.remove(PLCOPEN_TMP)
             except:
                 pass
-            print("===== dev_capture finished OK (no changes) =====")
+
+            # If nothing meaningful changed, skip commit
+            if not dirty_paths or only_noise:
+                print("[dev] No real PLC change detected AND no meaningful repo changes. Skipping git commit.")
+                print("===== dev_capture finished OK (no changes) =====")
+                print("Log:", LOG_PATH)
+                system.exit()
+
+            # Scripts (or other real repo files) changed → commit/push them
+            print("[dev] PLC unchanged but repo files changed (likely scripts/workflows). Committing changes.")
+            msg = "DEV scripts/config update %s" % ts
+            ok, note = _git_commit_all_if_dirty(BRANCH, msg)
+            if not ok:
+                print("[dev] ERROR: git commit failed:", note)
+                system.exit()
+            print("[dev] GIT:", note)
+
+            print("===== dev_capture finished OK (repo changes only) =====")
             print("Log:", LOG_PATH)
             system.exit()
 
-        # REAL change → update stable PLCopen + stable archive
+        # REAL PLC change → update stable PLCopen + stable archive
         shutil.copyfile(PLCOPEN_TMP, PLCOPEN_LATEST)
         try:
             os.remove(PLCOPEN_TMP)
