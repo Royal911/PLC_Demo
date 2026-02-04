@@ -1,12 +1,8 @@
 # encoding: utf-8
-# DEPLOY STAGING (ARCHIVE): Git staging -> open PLC_latest.projectarchive -> download to PLC -> boot app
+# DEPLOY STAGING (ARCHIVE): Git staging -> use PLC_latest.projectarchive -> download to PLC -> boot app (+start if needed)
 #
-# Usage:
+# Run:
 # "C:\Program Files\CODESYS 3.5.21.40\CODESYS\Common\CODESYS.exe" --noUI --profile="CODESYS V3.5 SP21 Patch 4" --runscript="C:\PLC_REPO\scripts\deploy_staging.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_STG.project"
-#
-# NOTE:
-# - The .project path is only used to get a configured target/device entry if needed.
-# - The actual content deployed comes from: exports\archives\PLC_latest.projectarchive
 
 import os
 import sys
@@ -15,7 +11,7 @@ import subprocess
 import traceback
 
 REPO_ROOT = r"C:\PLC_REPO"
-TIMEOUT_S = 120
+TIMEOUT_S = 180
 BRANCH = "staging"
 
 LATEST_ARCHIVE = os.path.join(REPO_ROOT, "exports", "archives", "PLC_latest.projectarchive")
@@ -70,21 +66,17 @@ def _close_projects_best_effort():
         pass
 
 
-def _open_project_primary(project_path):
-    _close_projects_best_effort()
-    proj = projects.primary
-    if proj is None:
-        proj = projects.open(project_path, primary=True)
-    return proj
-
-
 def _wait_active_app(proj):
     start = time.time()
+    last_seen = None
     while (time.time() - start) < TIMEOUT_S:
-        if hasattr(proj, "active_application"):
-            app = proj.active_application
-            if app is not None:
-                return app
+        try:
+            if hasattr(proj, "active_application"):
+                last_seen = proj.active_application
+                if last_seen is not None:
+                    return last_seen
+        except:
+            pass
         time.sleep(1)
     return None
 
@@ -107,7 +99,7 @@ def _connect_and_login(app, user, pw):
     else:
         print("Online: relying on stored credentials")
 
-    # connect
+    # connect (retry)
     last_err = None
     for attempt in [1, 2, 3]:
         try:
@@ -158,7 +150,7 @@ def _disconnect_best_effort(online_app, dev):
 
 
 def _start_if_needed(online_app):
-    # If already running, don't start
+    # only start if not already running
     try:
         if hasattr(online_app, "application_state"):
             st = online_app.application_state
@@ -169,17 +161,27 @@ def _start_if_needed(online_app):
     except:
         pass
 
+    # try start
     if hasattr(online_app, "start"):
         try:
             online_app.start()
             print("DEPLOY: called online_app.start()")
+            return True
         except Exception as e:
             print("DEPLOY: online_app.start() failed:", repr(e))
+
+    # try reset as last resort
+    if hasattr(online_app, "reset"):
+        try:
+            online_app.reset()
+            print("DEPLOY: called online_app.reset()")
+        except:
+            pass
+
     return True
 
 
 def _deploy_boot_app(online_app):
-    # Your runtime supports this (we already proved it)
     if hasattr(online_app, "create_boot_application"):
         online_app.create_boot_application()
         print("DEPLOY: create_boot_application OK")
@@ -189,40 +191,34 @@ def _deploy_boot_app(online_app):
 
 
 # -------------------------
-# ARCHIVE restore/open (best-effort)
+# ARCHIVE open logic
 # -------------------------
-def _open_archive_as_project(archive_path):
-    """
-    CODESYS scripting differs by version.
-    We try common patterns:
-      - projects.open(archive_path, primary=True)  (sometimes works directly)
-      - projects.open_archive(archive_path, primary=True) if available
-    """
+def _open_archive_project_best_effort(archive_path):
     if not os.path.isfile(archive_path):
         raise Exception("Latest archive not found: %s" % archive_path)
 
     print("ARCHIVE: using:", archive_path)
 
-    # Try open_archive if it exists
+    _close_projects_best_effort()
+
+    # 1) Try projects.open_archive(path) with NO kwargs (your install rejects primary=)
     if hasattr(projects, "open_archive"):
         try:
-            _close_projects_best_effort()
-            proj = projects.open_archive(archive_path, primary=True)
-            print("ARCHIVE: opened via projects.open_archive")
+            proj = projects.open_archive(archive_path)
+            print("ARCHIVE: opened via projects.open_archive(path)")
             return proj
         except Exception as e:
-            print("ARCHIVE: open_archive failed:", repr(e))
+            print("ARCHIVE: open_archive(path) failed:", repr(e))
 
-    # Try opening directly
+    # 2) Try projects.open(path) (works for you)
     try:
-        _close_projects_best_effort()
-        proj = projects.open(archive_path, primary=True)
-        print("ARCHIVE: opened via projects.open(archive_path)")
+        proj = projects.open(archive_path)
+        print("ARCHIVE: opened via projects.open(path)")
         return proj
     except Exception as e:
-        print("ARCHIVE: projects.open(archive_path) failed:", repr(e))
+        print("ARCHIVE: projects.open(path) failed:", repr(e))
 
-    raise Exception("Could not open archive via scripting API (need different method on this install)")
+    raise Exception("Could not open archive with available API calls")
 
 
 # -------------------------
@@ -230,7 +226,7 @@ def _open_archive_as_project(archive_path):
 # -------------------------
 def main():
     if len(sys.argv) < 2:
-        print("ERROR: Missing STG project path (used only for device config reference)")
+        print("ERROR: Missing STG project path (reference)")
         system.exit()
 
     stg_project_path = sys.argv[1].strip().strip('"')
@@ -248,14 +244,22 @@ def main():
     user = os.environ.get("CODESYS_USER", "")
     pw = os.environ.get("CODESYS_PASS", "")
 
-    # Open the archive project (this is what we deploy)
-    proj = _open_archive_as_project(LATEST_ARCHIVE)
+    # Try opening archive as a project
+    proj = _open_archive_project_best_effort(LATEST_ARCHIVE)
     app = _wait_active_app(proj)
+
+    # Fallback: if archive-open didn't create active_application, use reference project instead
     if app is None:
-        print("ERROR: active_application timeout after opening archive")
+        print("WARNING: archive project has no active_application (headless limitation).")
+        print("FALLBACK: opening STG reference project and deploying boot app from there.")
+        _close_projects_best_effort()
+        proj = projects.open(stg_project_path)
+        app = _wait_active_app(proj)
+
+    if app is None:
+        print("ERROR: active_application timeout (both archive + reference project).")
         system.exit()
 
-    # Connect & deploy
     online_app, dev = _connect_and_login(app, user, pw)
     try:
         ok, used = _deploy_boot_app(online_app)
