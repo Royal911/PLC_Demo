@@ -68,13 +68,12 @@ def _close_projects_best_effort():
 
 def _wait_active_app(proj):
     start = time.time()
-    last_seen = None
     while (time.time() - start) < TIMEOUT_S:
         try:
             if hasattr(proj, "active_application"):
-                last_seen = proj.active_application
-                if last_seen is not None:
-                    return last_seen
+                app = proj.active_application
+                if app is not None:
+                    return app
         except:
             pass
         time.sleep(1)
@@ -150,18 +149,23 @@ def _disconnect_best_effort(online_app, dev):
 
 
 def _start_if_needed(online_app):
-    # only start if not already running
+    """
+    IMPORTANT:
+    - If state is already RUN -> do NOTHING (no start, no reset)
+    - Only call start when NOT running
+    """
+    # If already running, don't start/reset
     try:
         if hasattr(online_app, "application_state"):
             st = online_app.application_state
             print("Application state (before):", st)
             if str(st).lower().endswith(".run"):
-                print("Application already RUNNING. No start needed.")
+                print("Application already RUNNING. No start/reset needed.")
                 return True
     except:
         pass
 
-    # try start
+    # try start (only if not run)
     if hasattr(online_app, "start"):
         try:
             online_app.start()
@@ -170,14 +174,8 @@ def _start_if_needed(online_app):
         except Exception as e:
             print("DEPLOY: online_app.start() failed:", repr(e))
 
-    # try reset as last resort
-    if hasattr(online_app, "reset"):
-        try:
-            online_app.reset()
-            print("DEPLOY: called online_app.reset()")
-        except:
-            pass
-
+    # DO NOT reset automatically (it can stop/restart a running PLC)
+    print("WARNING: No supported start method succeeded (but boot app may still be valid).")
     return True
 
 
@@ -198,11 +196,11 @@ def _open_archive_project_best_effort(archive_path):
         raise Exception("Latest archive not found: %s" % archive_path)
 
     print("ARCHIVE: using:", archive_path)
-
     _close_projects_best_effort()
 
-    # 1) Try projects.open_archive(path) with NO kwargs (your install rejects primary=)
+    # Some installs have open_archive(reporter, path) or open_archive(path)
     if hasattr(projects, "open_archive"):
+        # 1) try open_archive(path)
         try:
             proj = projects.open_archive(archive_path)
             print("ARCHIVE: opened via projects.open_archive(path)")
@@ -210,7 +208,20 @@ def _open_archive_project_best_effort(archive_path):
         except Exception as e:
             print("ARCHIVE: open_archive(path) failed:", repr(e))
 
-    # 2) Try projects.open(path) (works for you)
+        # 2) try open_archive(reporter, path)
+        try:
+            class R(object):
+                def error(self, obj, msg): print("ARCHIVE import ERROR:", msg)
+                def warning(self, obj, msg): print("ARCHIVE import WARNING:", msg)
+                @property
+                def aborting(self): return False
+            proj = projects.open_archive(R(), archive_path)
+            print("ARCHIVE: opened via projects.open_archive(reporter, path)")
+            return proj
+        except Exception as e:
+            print("ARCHIVE: open_archive(reporter, path) failed:", repr(e))
+
+    # fallback that works for you:
     try:
         proj = projects.open(archive_path)
         print("ARCHIVE: opened via projects.open(path)")
@@ -238,7 +249,6 @@ def main():
 
     if not os.path.isfile(LATEST_ARCHIVE):
         print("ERROR: latest archive missing:", LATEST_ARCHIVE)
-        print("Tip: DEV capture must write exports\\archives\\PLC_latest.projectarchive")
         system.exit()
 
     user = os.environ.get("CODESYS_USER", "")
