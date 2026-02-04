@@ -77,27 +77,10 @@ def _close_projects_best_effort():
         pass
 
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> dev
 def _open_project_primary(project_path):
     _close_projects_best_effort()
     proj = projects.primary
     if proj is None:
-<<<<<<< HEAD
-        proj = projects.open(project_path)
-        print("proj type:", type(proj))
-        print("projects.primary:", projects.primary)
-        print("proj.active_application:", getattr(proj, "active_application", None))
-        print("project children:", len(proj.get_children(True)) if hasattr(proj, "get_children") else "n/a")
-
-    return proj
-
-
-=======
->>>>>>> dev
-=======
         # some installs accept primary=True, some don’t; try both
         try:
             proj = projects.open(project_path, primary=True)
@@ -106,7 +89,6 @@ def _open_project_primary(project_path):
     return proj
 
 
->>>>>>> dev
 def _wait_active_app(proj):
     start = time.time()
     while (time.time() - start) < TIMEOUT_S:
