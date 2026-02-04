@@ -1,13 +1,17 @@
 # encoding: utf-8
 # ============================================================
-# dev_capture.py  (DEV: PLC -> Git)
+# dev_capture.py  (DEV: PLC -> Git)  [STABLE CHANGE DETECTION]
 #
 # - Pull source from PLC (source_download)
 # - Save archive (timestamped) to exports\archives\dev\
-# - Copy that archive to ONE stable file: exports\archives\PLC_latest.projectarchive
-# - Export ONE PLCopen XML (overwritten): exports\plcopen\PLC_latest.plcopen.xml
-# - Normalize PLCopen (remove volatile timestamps + CANONICALIZE PlaceholderRedirections so it won't diff)
-# - Commit ENTIRE repo if dirty (git add -A) and push to origin/dev
+# - Export PLCopen XML to TEMP file
+# - Normalize TEMP PLCopen (remove timestamps + canonicalize PlaceholderRedirections)
+# - Compare TEMP vs stable exports\plcopen\PLC_latest.plcopen.xml
+#     - If SAME: do NOT update stable files, do NOT commit (prevents noise)
+#     - If DIFFERENT:
+#         - overwrite stable PLCopen file
+#         - overwrite stable archive: exports\archives\PLC_latest.projectarchive
+#         - commit ENTIRE repo if dirty (git add -A) and push to origin/dev
 #
 # Run:
 # "C:\Program Files\CODESYS 3.5.21.40\CODESYS\Common\CODESYS.exe" --noUI --profile="CODESYS V3.5 SP21 Patch 4" --runscript="C:\PLC_REPO\scripts\dev_capture.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_DEV.project"
@@ -20,6 +24,8 @@ import datetime
 import subprocess
 import re
 import traceback
+import hashlib
+import shutil
 
 REPO_ROOT = r"C:\PLC_REPO"
 EXPORTS_ROOT = os.path.join(REPO_ROOT, "exports")
@@ -34,6 +40,7 @@ PLCOPEN_DIR = os.path.join(EXPORTS_ROOT, "plcopen")
 
 ARCHIVE_LATEST = os.path.join(EXPORTS_ROOT, "archives", "PLC_latest.projectarchive")
 PLCOPEN_LATEST = os.path.join(PLCOPEN_DIR, "PLC_latest.plcopen.xml")
+PLCOPEN_TMP = os.path.join(PLCOPEN_DIR, "PLC_tmp.plcopen.xml")
 
 
 # -------------------------
@@ -81,6 +88,28 @@ def _ensure_dir(p):
 
 
 # -------------------------
+# File hashing / compare
+# -------------------------
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(1024 * 1024)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+def _files_equal(a, b):
+    if not os.path.isfile(a) or not os.path.isfile(b):
+        return False
+    try:
+        return _sha256_file(a) == _sha256_file(b)
+    except:
+        return False
+
+
+# -------------------------
 # Git helpers
 # -------------------------
 def _run_git(args):
@@ -97,11 +126,9 @@ def _run_git(args):
     except Exception as e:
         return 1, "", repr(e)
 
-
 def _git_has_origin():
     rc, out, err = _run_git(["remote"])
     return rc == 0 and ("origin" in out.split())
-
 
 def _git_checkout(branch):
     rc, out, err = _run_git(["checkout", branch])
@@ -115,7 +142,6 @@ def _git_checkout(branch):
         return False
     return True
 
-
 def _git_ensure_upstream(branch):
     if not _git_has_origin():
         return
@@ -124,7 +150,6 @@ def _git_ensure_upstream(branch):
         return
     _run_git(["branch", "--set-upstream-to=origin/%s" % branch, branch])
 
-
 def _git_status_porcelain():
     rc, out, err = _run_git(["status", "--porcelain"])
     if rc != 0:
@@ -132,7 +157,6 @@ def _git_status_porcelain():
         print(out); print(err)
         return ""
     return out.strip()
-
 
 def _git_commit_all_if_dirty(branch, message):
     st = _git_status_porcelain()
@@ -210,8 +234,7 @@ def normalize_plcopen_xml(path):
 
             canon = sorted(set(canon), key=_key)
 
-            # Rebuild deterministically (indent does not need to match original exactly)
-            inner_indent = "        "  # 8 spaces (looks nice & stable)
+            inner_indent = "        "  # stable indent
             if canon:
                 new_block = "<PlaceholderRedirections>\n" + \
                             "\n".join([inner_indent + t for t in canon]) + \
@@ -253,14 +276,12 @@ def _close_projects_best_effort():
     except:
         pass
 
-
 def _open_project_primary(project_path):
     _close_projects_best_effort()
     proj = projects.primary
     if proj is None:
         proj = projects.open(project_path, primary=True)
     return proj
-
 
 def _wait_active_app(proj):
     start = time.time()
@@ -271,7 +292,6 @@ def _wait_active_app(proj):
                 return app
         time.sleep(1)
     return None
-
 
 def _connect_and_login(app, user, pw):
     online_app = online.create_online_application(app)
@@ -326,7 +346,6 @@ def _connect_and_login(app, user, pw):
             raise Exception("Login failed")
 
     return online_app, dev
-
 
 def _disconnect_best_effort(online_app, dev):
     try:
@@ -387,7 +406,7 @@ def main():
         else:
             print("[dev] CAPTURE: no source pull method found")
 
-        # Save archive (timestamped + stable latest)
+        # Save timestamped archive (ALWAYS ok; but stable archive updated only if PLCopen changed)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         archive_path = os.path.join(ARCHIVE_DIR, "%s_%s.projectarchive" % (PLC_NAME, ts))
 
@@ -398,14 +417,7 @@ def main():
             print("[dev] ERROR: proj.save_archive not available")
             system.exit()
 
-        try:
-            import shutil
-            shutil.copyfile(archive_path, ARCHIVE_LATEST)
-            print("[dev] CAPTURE: wrote latest archive ->", ARCHIVE_LATEST)
-        except Exception as e:
-            print("[dev] WARNING: could not write latest archive:", repr(e))
-
-        # Export PLCopen (ONE stable file)
+        # Export PLCopen to TEMP (do not overwrite stable yet)
         class ER(ExportReporter):
             def error(self, obj, message):
                 print("PLCOPEN export ERROR on %s: %s" % (obj, message))
@@ -419,11 +431,17 @@ def main():
 
         reporter = ER()
 
-        print("[dev] CAPTURE: exporting PLCopen ->", PLCOPEN_LATEST)
+        try:
+            if os.path.isfile(PLCOPEN_TMP):
+                os.remove(PLCOPEN_TMP)
+        except:
+            pass
+
+        print("[dev] CAPTURE: exporting PLCopen (temp) ->", PLCOPEN_TMP)
 
         export_ok = False
         try:
-            proj.active_application.export_xml(reporter, PLCOPEN_LATEST, recursive=True)
+            proj.active_application.export_xml(reporter, PLCOPEN_TMP, recursive=True)
             export_ok = True
             print("[dev] CAPTURE: PLCopen export OK via app.export_xml")
         except Exception as e:
@@ -431,17 +449,45 @@ def main():
 
         if not export_ok:
             try:
-                proj.export_xml(reporter, proj.get_children(False), PLCOPEN_LATEST, recursive=True)
+                proj.export_xml(reporter, proj.get_children(False), PLCOPEN_TMP, recursive=True)
                 export_ok = True
                 print("[dev] CAPTURE: PLCopen export OK via proj.export_xml")
             except Exception as e:
                 print("[dev] CAPTURE: proj.export_xml failed:", repr(e))
 
-        if not export_ok:
+        if not export_ok or not os.path.isfile(PLCOPEN_TMP):
             print("[dev] ERROR: PLCopen export failed")
             system.exit()
 
-        normalize_plcopen_xml(PLCOPEN_LATEST)
+        normalize_plcopen_xml(PLCOPEN_TMP)
+
+        # Decide if REAL change happened
+        plcopen_changed = True
+        if os.path.isfile(PLCOPEN_LATEST):
+            plcopen_changed = not _files_equal(PLCOPEN_TMP, PLCOPEN_LATEST)
+
+        print("[dev] PLCOPEN changed:", plcopen_changed)
+
+        if not plcopen_changed:
+            print("[dev] No real PLC change detected. NOT updating stable XML or stable archive. Skipping git commit.")
+            try:
+                os.remove(PLCOPEN_TMP)
+            except:
+                pass
+            print("===== dev_capture finished OK (no changes) =====")
+            print("Log:", LOG_PATH)
+            system.exit()
+
+        # REAL change → update stable PLCopen + stable archive
+        shutil.copyfile(PLCOPEN_TMP, PLCOPEN_LATEST)
+        try:
+            os.remove(PLCOPEN_TMP)
+        except:
+            pass
+        print("[dev] Updated stable PLCopen ->", PLCOPEN_LATEST)
+
+        shutil.copyfile(archive_path, ARCHIVE_LATEST)
+        print("[dev] Updated stable archive ->", ARCHIVE_LATEST)
 
         # Commit/push whole repo if dirty
         msg = "DEV capture %s" % ts
