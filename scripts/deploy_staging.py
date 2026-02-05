@@ -81,7 +81,6 @@ def _open_project_primary(project_path):
     _close_projects_best_effort()
     proj = projects.primary
     if proj is None:
-        # some installs accept primary=True, some don’t; try both
         try:
             proj = projects.open(project_path, primary=True)
         except:
@@ -104,18 +103,14 @@ def _wait_active_app(proj):
 
 
 def _iter_tree(root):
-    """
-    Depth-first traverse of project objects (best effort).
-    """
     stack = [root]
     seen = set()
     while stack:
         obj = stack.pop()
         if obj is None:
             continue
-        oid = None
         try:
-            oid = str(obj)  # not stable but avoids infinite loops
+            oid = str(obj)
         except:
             oid = id(obj)
         if oid in seen:
@@ -128,7 +123,6 @@ def _iter_tree(root):
             if hasattr(obj, "get_children"):
                 kids = obj.get_children(True)
                 if kids:
-                    # reverse to keep order-ish
                     for k in list(kids)[::-1]:
                         stack.append(k)
         except:
@@ -139,7 +133,7 @@ def _obj_name(obj):
     for attr in ["name", "Name"]:
         try:
             v = getattr(obj, attr)
-            if isinstance(v, basestring):  # python2 in ScriptLib often
+            if isinstance(v, basestring):
                 return v
         except:
             pass
@@ -155,10 +149,6 @@ def _obj_name(obj):
 
 
 def _looks_like_device(obj):
-    """
-    Heuristic: in CODESYS, the top device node is usually named 'Device'
-    and/or object string contains 'Device('.
-    """
     n = _obj_name(obj)
     s = ""
     try:
@@ -177,23 +167,17 @@ def _looks_like_device(obj):
 
 
 def _delete_object(obj):
-    """
-    Try common delete/remove methods.
-    """
     for m in ["remove", "delete", "Delete", "Remove"]:
         try:
             if hasattr(obj, m):
                 getattr(obj, m)()
                 return True, "obj.%s()" % m
-        except Exception as e:
-            last = repr(e)
+        except:
+            pass
     return False, "no supported delete/remove method"
 
 
 def _delete_device_node(proj):
-    """
-    Delete the first object that looks like the Device node.
-    """
     print("STG: searching for Device node to delete...")
     for obj in _iter_tree(proj):
         try:
@@ -204,70 +188,116 @@ def _delete_device_node(proj):
                 if ok:
                     print("STG: deleted via", how)
                     return True
-                else:
-                    print("STG: found device but could not delete:", how)
-                    return False
+                print("STG: found device but could not delete:", how)
+                return False
         except:
             pass
     print("STG: no Device node found (nothing deleted).")
-    return True  # not fatal; sometimes project already has no device
+    return True
 
 
 # -------------------------
-# PLCopen import
+# PLCopen import (IMPORTANT: must be IImportReporter)
 # -------------------------
-class ImportReporter(object):
+def _make_import_reporter():
+    Base = globals().get("ImportReporter", None)
+    if Base is None:
+        raise Exception("CODESYS ImportReporter base class not found in globals().")
+
+    class IR(Base):
+        def __init__(self):
+            try:
+                Base.__init__(self)
+            except:
+                pass
+            self._skipped = []
+
+        # CODESYS varies: error(msg) OR error(obj, msg) OR error(obj, msg, detail)
+        def error(self, *args):
+            print("PLCOPEN import ERROR:", _fmt_reporter_args(args))
+
+        def warning(self, *args):
+            print("PLCOPEN import WARNING:", _fmt_reporter_args(args))
+
+        def info(self, *args):
+            print("PLCOPEN import INFO:", _fmt_reporter_args(args))
+
+        # Sometimes called: nonimportable(obj) OR nonimportable(obj, msg)
+        def nonimportable(self, *args):
+            if args:
+                self._skipped.append(args[0])
+            print("PLCOPEN non-importable:", _fmt_reporter_args(args))
+
+        @property
+        def aborting(self):
+            return False
+
+        @property
+        def skipped(self):
+            return self._skipped
+
+    return IR()
+
+
+def _fmt_reporter_args(args):
+    try:
+        if not args:
+            return "<no details>"
+        # make it readable
+        parts = []
+        for a in args:
+            try:
+                parts.append(str(a))
+            except:
+                parts.append(repr(a))
+        return " | ".join(parts)
+    except:
+        return repr(args)
+
     """
-    Must be tolerant: CODESYS calls reporter.error/warning with varying signatures
-    and sometimes expects properties like .skipped.
+    Your error 'expected IImportReporter' means we must subclass the built-in ImportReporter
+    exposed by CODESYS scripting, not a plain Python object.
     """
-    def __init__(self):
-        self._skipped = []
-        self._warnings = []
-        self._errors = []
+    Base = globals().get("ImportReporter", None)
+    if Base is None:
+        raise Exception("CODESYS ImportReporter base class not found in globals().")
 
-    # accept any signature
-    def error(self, *args):
-        self._errors.append(args)
-        try:
-            print("PLCOPEN import ERROR:", args)
-        except:
-            pass
+    class IR(Base):
+        def __init__(self):
+            try:
+                Base.__init__(self)
+            except:
+                pass
+            self._skipped = []
 
-    def warning(self, *args):
-        self._warnings.append(args)
-        try:
-            print("PLCOPEN import WARNING:", args)
-        except:
-            pass
+        # Most installs use (obj, message)
+        def error(self, obj, message):
+            print("PLCOPEN import ERROR:", message)
 
-    def info(self, *args):
-        try:
-            print("PLCOPEN import INFO:", args)
-        except:
-            pass
+        def warning(self, obj, message):
+            print("PLCOPEN import WARNING:", message)
 
-    def nonimportable(self, *args):
-        self._skipped.append(args)
-        try:
-            print("PLCOPEN non-importable:", args)
-        except:
-            pass
+        def info(self, obj, message):
+            print("PLCOPEN import INFO:", message)
 
-    @property
-    def aborting(self):
-        return False
+        # Some installs call nonimportable(obj)
+        def nonimportable(self, obj):
+            self._skipped.append(obj)
+            print("PLCOPEN non-importable:", obj)
 
-    # some installs try to read reporter.skipped
-    @property
-    def skipped(self):
-        return self._skipped
+        @property
+        def aborting(self):
+            return False
+
+        # Some installs try to read reporter.skipped
+        @property
+        def skipped(self):
+            return self._skipped
+
+    return IR()
 
 
 def _try_import_xml(target, reporter, xml_path):
-    """
-    Try common import_xml signatures (no kwargs).
-    """
     tries = [
         ("import_xml(reporter, path)", lambda: target.import_xml(reporter, xml_path)),
         ("import_xml(reporter, path, True)", lambda: target.import_xml(reporter, xml_path, True)),
@@ -293,16 +323,15 @@ def _import_plcopen_into_project(proj, xml_path):
         raise Exception("PLCopen file not found: %s" % xml_path)
 
     print("PLCOPEN: using:", xml_path)
+    reporter = _make_import_reporter()
+    print("Has ImportReporter?", "ImportReporter" in globals())
+    print("Globals containing 'report':", [k for k in globals().keys() if "report" in k.lower()])
 
-    reporter = ImportReporter()
-
-    # Prefer project-level import (more common)
     ok, used = _try_import_xml(proj, reporter, xml_path)
     if ok:
         print("PLCOPEN: import OK via project:", used)
         return True
 
-    # Fallback: try active application object if available
     try:
         app = getattr(proj, "active_application", None)
         if app is not None:
@@ -390,7 +419,6 @@ def _try_download_full(online_app):
     if OnlineChangeOption is None:
         return False, "OnlineChangeOption missing"
 
-    # common method names
     method_names = ["download", "application_download", "program_download"]
     opt_names = ["Download", "FullDownload", "All", "Keep"]
 
@@ -401,7 +429,6 @@ def _try_download_full(online_app):
             continue
         fn = getattr(online_app, m)
 
-        # try options
         for opt_name in opt_names:
             if hasattr(OnlineChangeOption, opt_name):
                 opt = getattr(OnlineChangeOption, opt_name)
@@ -411,7 +438,6 @@ def _try_download_full(online_app):
                 except Exception as e:
                     last_err = repr(e)
 
-        # try no-arg
         try:
             fn()
             return True, "online_app.%s()" % m
@@ -478,19 +504,14 @@ def main():
     # 1) Open STG project
     proj = _open_project_primary(stg_project_path)
 
-    # 2) Delete Device (required for your import)
+    # 2) Delete Device
     ok_del = _delete_device_node(proj)
     if not ok_del:
-        print("ERROR: Could not delete Device node (import will likely fail).")
+        print("ERROR: Could not delete Device node.")
         system.exit()
 
     # 3) Import PLCopen
-    try:
-        _import_plcopen_into_project(proj, PLCOPEN_PATH)
-    except Exception as e:
-        print("ERROR:", repr(e))
-        traceback.print_exc()
-        system.exit()
+    _import_plcopen_into_project(proj, PLCOPEN_PATH)
 
     # 4) Get active app
     app = _wait_active_app(proj)
