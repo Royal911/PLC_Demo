@@ -1,12 +1,29 @@
 # encoding: utf-8
-# DEPLOY STAGING: Git (staging branch) -> PLC STG runtime
+# ============================================================
+# deploy_production.py (PRODUCTION: Git + PLCopen -> PLC)  [IMPORT + SOURCE + SAVE]
 #
-# This version matches your environment:
-# - online_app exposes create_boot_application() (no download/program_download methods)
-# - After creating boot application, it will best-effort stop/start/reset/restart if available.
+# Structure (per your screenshot):
+#   Device
+#     └─ PLC Logic
+#         └─ Application
 #
-# Usage (CODESYS headless):
-# --runscript="C:\PLC_REPO\scripts\deploy_staging.py" --scriptargs:"C:\Users\Test_bench\Documents\PLC_STG.project"
+# Workflow:
+#   1) Git: checkout production + pull
+#   2) Open PROD reference project (contains configured device)
+#   3) Delete ONLY Application under PLC Logic
+#   4) Import PLCopen XML into PLC Logic
+#   5) Save project (persist imported objects)
+#   6) Online connect + login
+#   7) Source download (so the project contains source)
+#   8) Create boot application (+ start if needed)
+#   9) Save project again
+#
+# Run:
+# "C:\Program Files\CODESYS 3.5.21.40\CODESYS\Common\CODESYS.exe" --noUI ^
+#   --profile="CODESYS V3.5 SP21 Patch 4" ^
+#   --runscript="C:\PLC_REPO\scripts\deploy_production.py" ^
+#   --scriptargs:"C:\Users\Test_bench\Documents\PLC_PROD.project"
+# ============================================================
 
 import os
 import sys
@@ -15,12 +32,14 @@ import subprocess
 import traceback
 
 REPO_ROOT = r"C:\PLC_REPO"
-TIMEOUT_S = 120
+TIMEOUT_S = 180
 BRANCH = "prod"
+
+PLCOPEN_PATH = os.path.join(REPO_ROOT, "exports", "plcopen", "PLC_latest.plcopen.xml")
 
 
 # -------------------------
-# Git helpers
+# Git
 # -------------------------
 def _run_git(args):
     p = subprocess.Popen(
@@ -28,7 +47,7 @@ def _run_git(args):
         cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        shell=False,
+        shell=False
     )
     out, err = p.communicate()
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
@@ -50,6 +69,7 @@ def _git_checkout_and_update(branch):
         print(out3)
         print(err3)
         return False
+
     return True
 
 
@@ -68,21 +88,209 @@ def _close_projects_best_effort():
         pass
 
 
-def _open_project_primary(project_path):
+def _open_project(project_path):
     _close_projects_best_effort()
-    proj = projects.primary
-    if proj is None:
-        proj = projects.open(project_path, primary=True)
-    return proj
+    return projects.open(project_path)
 
 
+def _iter_children(obj, recursive=False):
+    try:
+        if hasattr(obj, "get_children"):
+            for c in obj.get_children(recursive):
+                yield c
+    except:
+        return
+
+
+def _obj_name(obj):
+    for attr in ("name", "Name", "get_name"):
+        try:
+            if hasattr(obj, attr):
+                v = getattr(obj, attr)
+                return v() if callable(v) else v
+        except:
+            pass
+    try:
+        return str(obj)
+    except:
+        return "<unknown>"
+
+
+def _find_node_by_name(proj_or_parent, name, recursive=True):
+    target = (name or "").strip().lower()
+    for obj in _iter_children(proj_or_parent, recursive=recursive):
+        nm = (_obj_name(obj) or "").strip().lower()
+        if nm == target:
+            return obj
+    return None
+
+
+def _find_child_exact(parent, name):
+    return _find_node_by_name(parent, name, recursive=False)
+
+
+def _dump_tree_one_level(proj):
+    print("PROD: top-level nodes:")
+    for c in _iter_children(proj, recursive=False):
+        print(" -", _obj_name(c))
+
+
+def _get_device_and_plclogic(proj):
+    print("PROD: searching for Device node...")
+    dev = _find_node_by_name(proj, "Device", recursive=True)
+    if dev is None:
+        _dump_tree_one_level(proj)
+        raise Exception("PROD: Device node not found in PROD project. (project must contain configured device)")
+
+    print("PROD: found device:", _obj_name(dev))
+
+    plc_logic = _find_child_exact(dev, "PLC Logic")
+    if plc_logic is None:
+        # handle case-insensitive variations like "Plc Logic"
+        for c in _iter_children(dev, recursive=False):
+            nm = (_obj_name(c) or "").strip().lower()
+            if "plc" in nm and "logic" in nm:
+                plc_logic = c
+                break
+
+    if plc_logic is None:
+        print("PROD: children under Device:")
+        for c in _iter_children(dev, recursive=False):
+            print(" -", _obj_name(c))
+        raise Exception("PROD: 'PLC Logic' not found under Device")
+
+    print("PROD: found plc logic:", _obj_name(plc_logic))
+    return dev, plc_logic
+
+
+def _delete_application_under_plclogic(plc_logic):
+    app = _find_child_exact(plc_logic, "Application")
+    if app is None:
+        print("PROD: No Application found under PLC Logic (already removed?)")
+        return
+
+    print("PROD: deleting Application under PLC Logic...")
+    if hasattr(app, "remove"):
+        app.remove()
+        print("PROD: Application deleted via app.remove()")
+        return
+
+    # best-effort fallbacks
+    if hasattr(plc_logic, "remove"):
+        try:
+            plc_logic.remove(app)
+            print("PROD: Application deleted via plc_logic.remove(app)")
+            return
+        except:
+            pass
+
+    raise Exception("PROD: Could not delete Application (no supported remove method found)")
+
+
+def _save_project_best_effort(proj):
+    # CODESYS versions differ; try common patterns
+    try:
+        if hasattr(proj, "save"):
+            proj.save()
+            print("PROD: project saved via proj.save()")
+            return True
+    except Exception as e:
+        print("WARN: proj.save() failed:", repr(e))
+
+    print("WARN: could not save project (no compatible save method found)")
+    return False
+
+
+# -------------------------
+# PLCopen import reporter
+# -------------------------
+def _make_import_reporter():
+    if "ImportReporter" not in globals():
+        return None, "ImportReporter not available in globals()"
+
+    Base = globals().get("ImportReporter")
+
+    class IR(Base):
+        def error(self, *args):
+            print("PLCOPEN import ERROR:", args)
+
+        def warning(self, *args):
+            print("PLCOPEN import WARNING:", args)
+
+        def info(self, *args):
+            print("PLCOPEN import INFO:", args)
+
+        def added(self, *args):
+            print("PLCOPEN import ADDED:", args)
+
+        def replaced(self, *args):
+            print("PLCOPEN import REPLACED:", args)
+
+        def skipped(self, *args):
+            print("PLCOPEN import SKIPPED:", args)
+
+        def nonimportable(self, *args):
+            print("PLCOPEN import NONIMPORTABLE:", args)
+
+        @property
+        def aborting(self):
+            return False
+
+    try:
+        return IR(), "subclassed ImportReporter"
+    except Exception as e:
+        return None, "failed to construct reporter: %s" % repr(e)
+
+
+def _import_plcopen_into_plclogic(plc_logic, plcopen_path):
+    if not os.path.isfile(plcopen_path):
+        return False, "PLCOPEN file not found: %s" % plcopen_path
+
+    if not hasattr(plc_logic, "import_xml"):
+        return False, "PLC Logic has no import_xml method"
+
+    reporter, rep_note = _make_import_reporter()
+    print("ImportReporter:", rep_note)
+
+    fn = getattr(plc_logic, "import_xml")
+    last_err = None
+
+    if reporter is not None:
+        for label, args in [
+            ("import_xml(reporter, path)", (reporter, plcopen_path)),
+            ("import_xml(reporter, path, True)", (reporter, plcopen_path, True)),
+            ("import_xml(reporter, path, False)", (reporter, plcopen_path, False)),
+        ]:
+            try:
+                fn(*args)
+                return True, label
+            except Exception as e:
+                last_err = e
+                print("PLCOPEN import attempt failed:", label, "->", repr(e))
+
+    try:
+        fn(plcopen_path)
+        return True, "import_xml(path)"
+    except Exception as e:
+        last_err = e
+        print("PLCOPEN import attempt failed: import_xml(path) ->", repr(e))
+
+    return False, "no working import_xml signature (last_err=%s)" % repr(last_err)
+
+
+# -------------------------
+# Online / deploy
+# -------------------------
 def _wait_active_app(proj):
     start = time.time()
     while (time.time() - start) < TIMEOUT_S:
-        if hasattr(proj, "active_application"):
-            app = proj.active_application
-            if app is not None:
-                return app
+        try:
+            if hasattr(proj, "active_application"):
+                app = proj.active_application
+                if app is not None:
+                    return app
+        except:
+            pass
         time.sleep(1)
     return None
 
@@ -105,9 +313,8 @@ def _connect_and_login(app, user, pw):
     else:
         print("Online: relying on stored credentials")
 
-    # Connect (retry - gateway can be flaky in headless)
     last_err = None
-    for attempt in range(1, 4):
+    for attempt in [1, 2, 3]:
         try:
             if hasattr(dev, "connected") and dev.connected:
                 print("Online: already connected")
@@ -129,7 +336,6 @@ def _connect_and_login(app, user, pw):
     if not (hasattr(dev, "connected") and dev.connected):
         raise Exception("Device did not connect (last_err=%s)" % repr(last_err))
 
-    # Login
     if not online_app.is_logged_in:
         OnlineChangeOption = globals().get("OnlineChangeOption", None)
         if OnlineChangeOption is None:
@@ -155,67 +361,49 @@ def _disconnect_best_effort(online_app, dev):
         pass
 
 
-# -------------------------
-# Deploy logic
-# -------------------------
-def _list_methods(obj, label):
+def _source_download_best_effort(online_app):
+    if hasattr(online_app, "source_download"):
+        try:
+            print("PROD: source_download...")
+            online_app.source_download()
+            print("PROD: source_download OK")
+            return True
+        except Exception as e:
+            print("WARN: source_download failed:", repr(e))
+            return False
+
+    print("WARN: online_app.source_download not available on this runtime")
+    return False
+
+
+def _start_if_needed(online_app):
     try:
-        names = []
-        for n in dir(obj):
-            ln = n.lower()
-            if "download" in ln or "boot" in ln or "create" in ln or "start" in ln or "stop" in ln or "reset" in ln:
-                names.append(n)
-        print(label, "type:", type(obj))
-        print(label, "methods containing download/boot/create/start/stop/reset:")
-        for n in sorted(names):
-            print(" -", n)
-    except Exception as e:
-        print(label, "method listing failed:", repr(e))
+        st = getattr(online_app, "application_state", None)
+        print("Application state:", st)
+        if st is not None and str(st).lower().endswith(".run"):
+            print("Already RUN; not starting.")
+            return True
+    except:
+        pass
+
+    if hasattr(online_app, "start"):
+        try:
+            online_app.start()
+            print("DEPLOY: start OK")
+            return True
+        except Exception as e:
+            print("DEPLOY: start failed:", repr(e))
+
+    return True
 
 
-def _best_effort_restart(online_app):
-    """
-    Different CODESYS versions expose different control calls.
-    We'll try a few in a safe order. Failures are logged but not fatal.
-    """
-    # try to stop then start
-    for m in ["stop", "start"]:
-        if hasattr(online_app, m):
-            try:
-                getattr(online_app, m)()
-                print("DEPLOY: called online_app.%s()" % m)
-            except Exception as e:
-                print("DEPLOY: online_app.%s() failed:" % m, repr(e))
-
-    # try reset/restart
-    for m in ["reset", "restart"]:
-        if hasattr(online_app, m):
-            try:
-                getattr(online_app, m)()
-                print("DEPLOY: called online_app.%s()" % m)
-            except Exception as e:
-                print("DEPLOY: online_app.%s() failed:" % m, repr(e))
-
-
-def _deploy_via_boot_application(online_app):
-    """
-    Your environment supports create_boot_application() and NOT the usual download APIs.
-    """
-    _list_methods(online_app, "OnlineApp")
-
-    if not hasattr(online_app, "create_boot_application"):
-        return False, "create_boot_application not available"
-
-    try:
+def _deploy_boot_app(online_app):
+    if hasattr(online_app, "create_boot_application"):
         online_app.create_boot_application()
-        print("DEPLOY: SUCCESS via OnlineApp.create_boot_application()")
-
-        # Optional but recommended: apply/run the new boot app
-        _best_effort_restart(online_app)
-
-        return True, "OnlineApp.create_boot_application()"
-    except Exception as e:
-        return False, "create_boot_application failed: %s" % repr(e)
+        print("DEPLOY: create_boot_application OK")
+        _start_if_needed(online_app)
+        return True, "create_boot_application"
+    return False, "create_boot_application not available"
 
 
 # -------------------------
@@ -223,36 +411,64 @@ def _deploy_via_boot_application(online_app):
 # -------------------------
 def main():
     if len(sys.argv) < 2:
-        print("ERROR: Missing STG project path")
-        print('--scriptargs:"C:\\Users\\Test_bench\\Documents\\PLC_STG.project"')
+        print("ERROR: Missing PROD project path")
         system.exit()
 
-    project_path = sys.argv[1].strip().strip('"')
-    print("STG project:", project_path)
+    prod_project_path = sys.argv[1].strip().strip('"')
+    print("PROD project:", prod_project_path)
+    print("PLCOPEN: using:", PLCOPEN_PATH)
 
     if not _git_checkout_and_update(BRANCH):
         print("ERROR: git checkout/pull failed")
         system.exit()
 
-    user = os.environ.get("CODESYS_USER", "")
-    pw = os.environ.get("CODESYS_PASS", "")
-
-    proj = _open_project_primary(project_path)
-    app = _wait_active_app(proj)
-    if app is None:
-        print("ERROR: active_application timeout")
+    if not os.path.isfile(PLCOPEN_PATH):
+        print("ERROR: PLCopen missing:", PLCOPEN_PATH)
         system.exit()
 
-    online_app, dev = _connect_and_login(app, user, pw)
+    # 1) Open project
+    proj = _open_project(prod_project_path)
+
+    # 2) Find Device -> PLC Logic
+    dev, plc_logic = _get_device_and_plclogic(proj)
+
+    # 3) Delete Application under PLC Logic
+    _delete_application_under_plclogic(plc_logic)
+
+    # 4) Import PLCopen into PLC Logic
+    ok, used = _import_plcopen_into_plclogic(plc_logic, PLCOPEN_PATH)
+    if not ok:
+        raise Exception("PLCopen import failed: %s" % used)
+    print("PLCOPEN: import OK via", used)
+
+    # 5) Save project after import
+    _save_project_best_effort(proj)
+
+    # 6) Get active app
+    app = _wait_active_app(proj)
+    if app is None:
+        raise Exception("active_application timeout after PLCopen import")
+
+    # 7) Online connect + login
+    user = os.environ.get("CODESYS_USER", "")
+    pw = os.environ.get("CODESYS_PASS", "")
+    online_app, dev_online = _connect_and_login(app, user, pw)
 
     try:
-        ok, used = _deploy_via_boot_application(online_app)
+        # 8) Source download (so project contains source)
+        _source_download_best_effort(online_app)
+
+        # 9) Create boot app (+start)
+        ok, used = _deploy_boot_app(online_app)
         if not ok:
-            print("ERROR: deploy failed:", used)
-            system.exit()
+            raise Exception("DEPLOY failed: %s" % used)
         print("DEPLOY OK:", used)
+
     finally:
-        _disconnect_best_effort(online_app, dev)
+        _disconnect_best_effort(online_app, dev_online)
+
+    # 10) Save project again (persist anything updated after source download)
+    _save_project_best_effort(proj)
 
     try:
         system.exit()
