@@ -33,7 +33,7 @@ import traceback
 
 REPO_ROOT = r"C:\PLC_REPO"
 TIMEOUT_S = 180
-BRANCH = "PROD"
+BRANCH = "prod"
 
 PLCOPEN_PATH = os.path.join(REPO_ROOT, "exports", "plcopen", "PLC_latest.plcopen.xml")
 
