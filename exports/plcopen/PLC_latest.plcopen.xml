@@ -354,7 +354,7 @@ END_IF</xhtml>
                   <xhtml xmlns="http://www.w3.org/1999/xhtml">// ================= READ PROD INPUTS =================
 // Map your physical / fieldbus / Modbus / MQTT inputs here
 // Example:
- IO.In.StartPB      := TRUE;
+// IO.In.StartPB      := TRUE;
 // IO.In.StopPB       := DI_StopPB;
 // IO.In.EStop        := DI_EStop;
 // IO.In.LS_Extended  := DI_LS_Extended;
