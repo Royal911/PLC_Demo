@@ -319,8 +319,8 @@ ELSE
     IF gIO.In.StartPB THEN
         gIO.Out.MotorRun := TRUE;
         gIO.Out.Pump := TRUE;
-        gIO.Out.VFD_SpeedCmd := 60.0;
-        gIO.Out.ValveCmd := 10.0;
+        gIO.Out.VFD_SpeedCmd := 75.0; // Increase the speed 
+        gIO.Out.ValveCmd := 15.0; // Valve command should be 15
     END_IF
 
     IF gIO.In.StopPB THEN
